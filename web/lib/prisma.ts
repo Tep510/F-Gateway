@@ -11,14 +11,14 @@ function createPrismaClient() {
   const connectionString = process.env.DATABASE_URL
 
   if (!connectionString) {
-    throw new Error('DATABASE_URL is not defined')
+    throw new Error('DATABASE_URL is not defined in environment variables')
   }
 
   // Configure WebSocket for Node.js environment
   neonConfig.webSocketConstructor = ws
 
   const pool = new Pool({ connectionString })
-  const adapter = new PrismaNeon(pool as any)
+  const adapter = new PrismaNeon(pool)
 
   return new PrismaClient({
     adapter,
