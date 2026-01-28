@@ -83,61 +83,70 @@ async function readCSVHeaderClientSide(file: File): Promise<{ headers: string[],
     reader.onload = (e) => {
       try {
         const buffer = e.target?.result as ArrayBuffer
+        if (!buffer) {
+          reject(new Error('ファイルバッファが空です'))
+          return
+        }
+
         const uint8 = new Uint8Array(buffer)
+        console.log('Read bytes:', uint8.length)
 
         // Detect encoding and decode
         let encoding = 'utf-8'
         let text: string
 
         // Check for BOM
-        if (uint8[0] === 0xEF && uint8[1] === 0xBB && uint8[2] === 0xBF) {
+        if (uint8.length >= 3 && uint8[0] === 0xEF && uint8[1] === 0xBB && uint8[2] === 0xBF) {
           encoding = 'utf-8'
           text = new TextDecoder('utf-8').decode(uint8.slice(3))
+          console.log('Detected UTF-8 with BOM')
         } else {
           // Try UTF-8 first (most common)
-          try {
-            const decoder = new TextDecoder('utf-8', { fatal: false })
-            text = decoder.decode(uint8)
+          const decoder = new TextDecoder('utf-8', { fatal: false })
+          text = decoder.decode(uint8)
 
-            // Check if decoding produced replacement characters (indicates wrong encoding)
-            // For Japanese Shift_JIS files, UTF-8 decode will produce lots of replacement chars
-            const replacementCount = (text.match(/\uFFFD/g) || []).length
-            if (replacementCount > 10) {
-              // Likely not UTF-8, try Shift_JIS
-              throw new Error('Too many replacement characters')
-            }
-            encoding = 'utf-8'
-          } catch {
-            // Fallback to Shift_JIS
+          // Check if decoding produced replacement characters (indicates wrong encoding)
+          const replacementCount = (text.match(/\uFFFD/g) || []).length
+          console.log('UTF-8 replacement chars:', replacementCount)
+
+          if (replacementCount > 10) {
+            // Likely not UTF-8, try Shift_JIS
+            console.log('Trying Shift_JIS...')
             try {
               encoding = 'shift_jis'
               text = new TextDecoder('shift_jis').decode(uint8)
-            } catch {
-              // If shift_jis not supported, try with label 'sjis'
-              try {
-                encoding = 'sjis'
-                text = new TextDecoder('sjis').decode(uint8)
-              } catch {
-                // Last resort: use UTF-8 with replacement
-                encoding = 'utf-8'
-                text = new TextDecoder('utf-8', { fatal: false }).decode(uint8)
-              }
+            } catch (sjisErr) {
+              console.log('Shift_JIS failed, using UTF-8 with replacements')
+              encoding = 'utf-8'
+              // text is already decoded with UTF-8
             }
+          } else {
+            encoding = 'utf-8'
+            console.log('Detected UTF-8')
           }
         }
 
         // Normalize line endings
+        const originalLength = text.length
         text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        console.log('Text length:', originalLength, '->', text.length)
 
         // Get first line (header)
-        const firstLine = text.split('\n')[0]
+        const lines = text.split('\n')
+        console.log('Number of lines:', lines.length)
+
+        const firstLine = lines[0]
         if (!firstLine?.trim()) {
           reject(new Error('ファイルが空です'))
           return
         }
+        console.log('First line length:', firstLine.length)
+        console.log('First line preview:', firstLine.substring(0, 200))
 
         // Parse CSV line
         const headers = parseCSVLine(firstLine)
+        console.log('Parsed headers count:', headers.length)
+
         if (headers.length === 0) {
           reject(new Error('ヘッダー行が空です'))
           return
@@ -146,11 +155,15 @@ async function readCSVHeaderClientSide(file: File): Promise<{ headers: string[],
         resolve({ headers, encoding })
       } catch (err) {
         console.error('CSV header detection error:', err)
-        reject(new Error('ファイルの読み取りに失敗しました。ファイル形式を確認してください。'))
+        const errorMessage = err instanceof Error ? err.message : String(err)
+        reject(new Error(`ヘッダー検出エラー: ${errorMessage}`))
       }
     }
 
-    reader.onerror = () => reject(new Error('ファイル読み取りエラー'))
+    reader.onerror = (e) => {
+      console.error('FileReader error:', e)
+      reject(new Error('ファイル読み取りエラー'))
+    }
     reader.readAsArrayBuffer(slice)
   })
 }
