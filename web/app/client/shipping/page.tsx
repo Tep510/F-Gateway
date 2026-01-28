@@ -11,6 +11,7 @@ interface UploadLog {
   id: number
   fileName: string
   fileSize: number
+  rowCount: number | null
   status: string
   uploadedAt: string
   errorMessage: string | null
@@ -260,13 +261,14 @@ export default function ShippingPage() {
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">日時</th>
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">ファイル名</th>
                   <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">サイズ</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">行数</th>
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">ステータス</th>
                 </tr>
               </thead>
               <tbody>
                 {logs.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-8 text-center text-gray-500">
+                    <td colSpan={5} className="py-8 text-center text-gray-500">
                       アップロード履歴がありません
                     </td>
                   </tr>
@@ -279,6 +281,9 @@ export default function ShippingPage() {
                       <td className="py-3 px-4 text-sm text-gray-700 font-mono">{log.fileName}</td>
                       <td className="py-3 px-4 text-sm text-gray-700 text-right">
                         {formatFileSize(log.fileSize)}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-gray-700 text-right">
+                        {log.rowCount != null ? log.rowCount.toLocaleString() : '-'}
                       </td>
                       <td className="py-3 px-4 text-sm">
                         <StatusBadge status={log.status === 'completed' ? 'success' : 'error'}>

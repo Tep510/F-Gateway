@@ -188,6 +188,7 @@ model CsvUploadLog {
   googleDriveFileId String   @map("google_drive_file_id") @db.VarChar(255)
   fileName          String   @map("file_name") @db.VarChar(255)
   fileSize          BigInt?  @map("file_size")
+  rowCount          Int?     @map("row_count")
   uploadStatus      String   @map("upload_status") @db.VarChar(20)
   errorMessage      String?  @map("error_message") @db.Text
   uploadedAt        DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)

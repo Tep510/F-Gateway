@@ -89,6 +89,7 @@ export async function POST(request: Request) {
         googleDriveFileId: `pending_${timestamp}`, // Placeholder until Google Drive integration
         fileName: newFileName,
         fileSize: BigInt(file.size),
+        rowCount,
         uploadStatus: 'completed',
       },
     })
@@ -156,6 +157,7 @@ export async function GET(request: Request) {
         id: log.id,
         fileName: log.fileName,
         fileSize: Number(log.fileSize),
+        rowCount: log.rowCount,
         status: log.uploadStatus,
         uploadedAt: log.uploadedAt.toISOString(),
         errorMessage: log.errorMessage,
