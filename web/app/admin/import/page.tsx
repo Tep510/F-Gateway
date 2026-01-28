@@ -85,7 +85,7 @@ async function readCSVHeaderClientSide(file: File): Promise<{ headers: string[],
         const buffer = e.target?.result as ArrayBuffer
         const uint8 = new Uint8Array(buffer)
 
-        // Detect encoding
+        // Detect encoding and decode
         let encoding = 'utf-8'
         let text: string
 
@@ -94,15 +94,35 @@ async function readCSVHeaderClientSide(file: File): Promise<{ headers: string[],
           encoding = 'utf-8'
           text = new TextDecoder('utf-8').decode(uint8.slice(3))
         } else {
-          // Try UTF-8 first, validate byte sequences
-          const isValidUtf8 = validateUtf8(uint8)
-          if (isValidUtf8) {
+          // Try UTF-8 first (most common)
+          try {
+            const decoder = new TextDecoder('utf-8', { fatal: false })
+            text = decoder.decode(uint8)
+
+            // Check if decoding produced replacement characters (indicates wrong encoding)
+            // For Japanese Shift_JIS files, UTF-8 decode will produce lots of replacement chars
+            const replacementCount = (text.match(/\uFFFD/g) || []).length
+            if (replacementCount > 10) {
+              // Likely not UTF-8, try Shift_JIS
+              throw new Error('Too many replacement characters')
+            }
             encoding = 'utf-8'
-            text = new TextDecoder('utf-8').decode(uint8)
-          } else {
+          } catch {
             // Fallback to Shift_JIS
-            encoding = 'shift_jis'
-            text = new TextDecoder('shift_jis').decode(uint8)
+            try {
+              encoding = 'shift_jis'
+              text = new TextDecoder('shift_jis').decode(uint8)
+            } catch {
+              // If shift_jis not supported, try with label 'sjis'
+              try {
+                encoding = 'sjis'
+                text = new TextDecoder('sjis').decode(uint8)
+              } catch {
+                // Last resort: use UTF-8 with replacement
+                encoding = 'utf-8'
+                text = new TextDecoder('utf-8', { fatal: false }).decode(uint8)
+              }
+            }
           }
         }
 
@@ -125,7 +145,8 @@ async function readCSVHeaderClientSide(file: File): Promise<{ headers: string[],
 
         resolve({ headers, encoding })
       } catch (err) {
-        reject(err)
+        console.error('CSV header detection error:', err)
+        reject(new Error('ファイルの読み取りに失敗しました。ファイル形式を確認してください。'))
       }
     }
 
