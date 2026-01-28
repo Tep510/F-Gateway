@@ -34,7 +34,6 @@ export async function GET() {
         _count: {
           select: {
             users: true,
-            csvUploadLogs: true,
           },
         },
       },
@@ -126,7 +125,6 @@ export async function POST(request: Request) {
         _count: {
           select: {
             users: true,
-            csvUploadLogs: true,
           },
         },
       },

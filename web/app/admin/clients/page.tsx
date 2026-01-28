@@ -20,7 +20,7 @@ interface Client {
   monthlyExecutionDay: number | null
   createdAt: string
   updatedAt: string
-  _count: { users: number; csvUploadLogs: number }
+  _count: { users: number }
 }
 
 interface EditFormData {
