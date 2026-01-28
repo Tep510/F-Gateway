@@ -1,6 +1,5 @@
 import { PrismaClient } from '@/app/generated/prisma'
 import { neonConfig } from '@neondatabase/serverless'
-import { Pool } from '@neondatabase/serverless'
 import { PrismaNeon } from '@prisma/adapter-neon'
 import ws from 'ws'
 
@@ -18,13 +17,10 @@ function createPrismaClient() {
     throw new Error('DATABASE_URL is not defined')
   }
 
-  console.log('Initializing Prisma Client with Neon adapter')
-
-  const pool = new Pool({ connectionString })
-  const adapter = new PrismaNeon(pool as any)
+  const adapter = new PrismaNeon({ connectionString })
 
   return new PrismaClient({
-    adapter: adapter as any,
+    adapter,
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   })
 }
