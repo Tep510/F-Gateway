@@ -7,8 +7,17 @@ export default function SignInButton() {
     signIn("google", { callbackUrl: "/client" })
   }
 
-  const handleDevSignIn = (role: string) => {
-    signIn("credentials", { role, callbackUrl: role === "admin" ? "/admin" : "/client", redirect: true })
+  const handleDevSignIn = async (role: string) => {
+    const result = await signIn("credentials", {
+      role,
+      callbackUrl: role === "admin" ? "/admin" : "/client",
+      redirect: false,
+    })
+    if (result?.error) {
+      alert("開発ログイン失敗: " + result.error)
+    } else {
+      window.location.href = role === "admin" ? "/admin" : "/client"
+    }
   }
 
   return (
