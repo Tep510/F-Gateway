@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Vercel-style Light Mode */
+:root {
+  --background: #ffffff;
+  --foreground: #000000;
+  --accents-1: #fafafa;
+  --accents-2: #eaeaea;
+  --accents-3: #999999;
+  --accents-4: #888888;
+  --accents-5: #666666;
+  --accents-6: #444444;
+  --accents-7: #333333;
+  --accents-8: #111111;
+  --border-color: #eaeaea;
+  --success: #0070f3;
+  --error: #ee0000;
+  --warning: #f5a623;
+  --cyan: #79ffe1;
+  --purple: #f81ce5;
+  --violet: #7928ca;
+  --alert: #ff0080;
+}
+
+/* Vercel-style Dark Mode */
+.dark {
+  --background: #000000;
+  --foreground: #ffffff;
+  --accents-1: #111111;
+  --accents-2: #333333;
+  --accents-3: #444444;
+  --accents-4: #666666;
+  --accents-5: #888888;
+  --accents-6: #999999;
+  --accents-7: #eaeaea;
+  --accents-8: #fafafa;
+  --border-color: #333333;
+  --success: #0070f3;
+  --error: #ff0000;
+  --warning: #f5a623;
+  --cyan: #79ffe1;
+  --purple: #f81ce5;
+  --violet: #7928ca;
+  --alert: #ff0080;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth theme transition */
+* {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Vercel-style scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--accents-1);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accents-3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accents-4);
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "project": "f-gateway",
+  "crons": [
+    {
+      "path": "/api/cron/process-imports",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}

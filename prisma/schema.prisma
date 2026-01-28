@@ -1,0 +1,503 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// System Tables
+// ==========================================
+
+model SystemLog {
+  id            Int      @id @default(autoincrement())
+  logLevel      String   @map("log_level") @db.VarChar(10)     // debug, info, warn, error
+  category      String   @db.VarChar(50)                       // csv_upload, product_import, api, system, auth
+  action        String   @db.VarChar(100)                      // import_start, validation_error, etc.
+  message       String   @db.Text
+  clientId      Int?     @map("client_id")
+  userId        String?  @map("user_id")
+  metadata      Json?                                          // Additional data (request body, response, etc.)
+  errorMessage  String?  @map("error_message") @db.Text
+  errorStack    String?  @map("error_stack") @db.Text
+  durationMs    Int?     @map("duration_ms")                   // Processing time in milliseconds
+  ipAddress     String?  @map("ip_address") @db.VarChar(45)
+  userAgent     String?  @map("user_agent") @db.Text
+  requestId     String?  @map("request_id") @db.VarChar(50)    // Correlation ID for tracing
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([createdAt])
+  @@index([logLevel])
+  @@index([category])
+  @@index([clientId])
+  @@index([requestId])
+  @@map("system_logs")
+}
+
+model SystemSetting {
+  id          Int      @id @default(autoincrement())
+  settingKey  String   @unique @map("setting_key") @db.VarChar(100)
+  settingValue String  @map("setting_value") @db.Text
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("system_settings")
+}
+
+// ==========================================
+// NextAuth.js Tables
+// ==========================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ==========================================
+// Master Tables
+// ==========================================
+
+model Client {
+  id                    Int       @id @default(autoincrement())
+  clientCode            String    @unique @map("client_code") @db.VarChar(50)
+  clientName            String    @map("client_name") @db.VarChar(255)
+  status                String    @default("active") @db.VarChar(20)
+
+  // Note: Google Drive設定はシステム全体で4フォルダを共有（SystemSettingで管理）
+  // クライアント固有のDrive設定は不要
+
+  // Asana settings
+  asanaProjectId        String?   @map("asana_project_id") @db.VarChar(100)
+  asanaEnabled          Boolean   @default(false) @map("asana_enabled")
+  monthlyExecutionDay   Int?      @map("monthly_execution_day")
+  monthlyExecutionTime  String?   @map("monthly_execution_time") @db.VarChar(5)
+  createdBy             String?   @map("created_by")
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  users                 User[]
+  googleDrives          ClientGoogleDrive[]
+  asanaSettings         ClientAsanaSetting[]
+  csvMappings           CsvMapping[]
+  csvUploadLogs         CsvUploadLog[]
+  csvConversionLogs     CsvConversionLog[]
+  fileTransfers         FileTransfer[]
+  resultReturns         ResultReturn[]
+  asanaNotifications    AsanaNotification[]
+  itemMasterDefinitions ItemMasterDefinition[]
+  clientItemMappings    ClientItemMapping[]
+  itemImportLogs        ItemImportLog[]
+  clientItemMasters     ClientItemMaster[]
+  clientItemSyncSettings ClientItemSyncSetting[]
+  productMasters        ProductMaster[]
+  productImportLogs     ProductImportLog[]
+  productColumnMapping  ClientProductColumnMapping?
+
+  @@map("clients")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique @db.VarChar(255)
+  emailVerified  DateTime? @map("email_verified")
+  name           String?  @db.VarChar(255)
+  image          String?
+  passwordHash   String?  @map("password_hash") @db.VarChar(255)
+  role           String   @default("client") @db.VarChar(20)
+  clientId       Int?     @map("client_id")
+  status         String   @default("active") @db.VarChar(20)
+  lastLoginAt    DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client         Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  accounts       Account[]
+  sessions       Session[]
+
+  @@map("users")
+}
+
+model ClientGoogleDrive {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  googleDriveFolderId String @map("google_drive_folder_id") @db.VarChar(255)
+  folderName        String   @map("folder_name") @db.VarChar(255)
+  folderPath        String?  @map("folder_path") @db.Text
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("client_google_drives")
+}
+
+model ClientAsanaSetting {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  asanaProjectId    String   @map("asana_project_id") @db.VarChar(100)
+  asanaProjectName  String?  @map("asana_project_name") @db.VarChar(255)
+  notificationEnabled Boolean @default(true) @map("notification_enabled")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("client_asana_settings")
+}
+
+// ==========================================
+// Transaction Tables - CSV Processing
+// ==========================================
+
+model CsvMapping {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  mappingName       String   @map("mapping_name") @db.VarChar(255)
+  fileNamePattern   String   @map("file_name_pattern") @db.VarChar(255)
+  columnMappings    Json     @map("column_mappings")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdBy         Int?     @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("csv_mappings")
+}
+
+model CsvUploadLog {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  googleDriveFileId String   @map("google_drive_file_id") @db.VarChar(255)
+  fileName          String   @map("file_name") @db.VarChar(255)
+  fileSize          BigInt?  @map("file_size")
+  rowCount          Int?     @map("row_count")
+  uploadStatus      String   @map("upload_status") @db.VarChar(20)
+  errorMessage      String?  @map("error_message") @db.Text
+  uploadedAt        DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+  processedAt       DateTime? @map("processed_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("csv_upload_logs")
+}
+
+model CsvConversionLog {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  googleDriveFileId String   @map("google_drive_file_id") @db.VarChar(255)
+  sourceFileName    String   @map("source_file_name") @db.VarChar(255)
+  targetFileName    String?  @map("target_file_name") @db.VarChar(255)
+  conversionStatus  String   @map("conversion_status") @db.VarChar(20)
+  totalRows         Int?     @map("total_rows")
+  successRows       Int?     @map("success_rows")
+  errorRows         Int?     @map("error_rows")
+  errorDetails      Json?    @map("error_details")
+  startedAt         DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("csv_conversion_logs")
+}
+
+model FileTransfer {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  sourceFileId      String   @map("source_file_id") @db.VarChar(255)
+  targetFileId      String?  @map("target_file_id") @db.VarChar(255)
+  transferStatus    String   @map("transfer_status") @db.VarChar(20)
+  transferType      String   @map("transfer_type") @db.VarChar(50)
+  errorMessage      String?  @map("error_message") @db.Text
+  startedAt         DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("file_transfers")
+}
+
+model ResultReturn {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  resultFileId      String?  @map("result_file_id") @db.VarChar(255)
+  returnStatus      String   @map("return_status") @db.VarChar(20)
+  returnMethod      String   @map("return_method") @db.VarChar(50)
+  errorMessage      String?  @map("error_message") @db.Text
+  returnedAt        DateTime @default(now()) @map("returned_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("result_returns")
+}
+
+model AsanaNotification {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  asanaTaskId       String?  @map("asana_task_id") @db.VarChar(100)
+  notificationType  String   @map("notification_type") @db.VarChar(50)
+  notificationStatus String  @map("notification_status") @db.VarChar(20)
+  message           String   @db.Text
+  sentAt            DateTime @default(now()) @map("sent_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("asana_notifications")
+}
+
+// ==========================================
+// Item Master Tables
+// ==========================================
+
+model ItemMasterDefinition {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  definitionName    String   @map("definition_name") @db.VarChar(255)
+  columnDefinitions Json     @map("column_definitions")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdBy         Int?     @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("item_master_definitions")
+}
+
+model ClientItemMapping {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  mappingName       String   @map("mapping_name") @db.VarChar(255)
+  sourceColumns     Json     @map("source_columns")
+  targetColumns     Json     @map("target_columns")
+  transformRules    Json?    @map("transform_rules")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdBy         Int?     @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("client_item_mappings")
+}
+
+model ItemImportLog {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  importSource      String   @map("import_source") @db.VarChar(100)
+  sourceFileId      String?  @map("source_file_id") @db.VarChar(255)
+  importStatus      String   @map("import_status") @db.VarChar(20)
+  totalItems        Int?     @map("total_items")
+  successItems      Int?     @map("success_items")
+  errorItems        Int?     @map("error_items")
+  errorDetails      Json?    @map("error_details")
+  startedAt         DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("item_import_logs")
+}
+
+model ClientItemMaster {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  itemCode          String   @map("item_code") @db.VarChar(100)
+  itemData          Json     @map("item_data")
+  isActive          Boolean  @default(true) @map("is_active")
+  importedAt        DateTime @default(now()) @map("imported_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, itemCode])
+  @@map("client_item_masters")
+}
+
+// ==========================================
+// Product Master Tables (商品マスター)
+// ==========================================
+
+model ProductMaster {
+  id                      Int      @id @default(autoincrement())
+  clientId                Int      @map("client_id")
+
+  // 基本情報
+  productCode             String   @map("product_code") @db.VarChar(100)
+  productName             String   @map("product_name") @db.VarChar(500)
+  janCode                 String?  @map("jan_code") @db.VarChar(50)
+
+  // 仕入先情報
+  supplierCode            String?  @map("supplier_code") @db.VarChar(50)
+  supplierName            String?  @map("supplier_name") @db.VarChar(255)
+
+  // 在庫情報
+  stockQuantity           Int      @default(0) @map("stock_quantity")
+  allocatedQuantity       Int      @default(0) @map("allocated_quantity")
+  freeStockQuantity       Int      @default(0) @map("free_stock_quantity")
+  defectiveStockQuantity  Int      @default(0) @map("defective_stock_quantity")
+  shortageQuantity        Int      @default(0) @map("shortage_quantity")
+  orderRemainingQuantity  Int      @default(0) @map("order_remaining_quantity")
+
+  // 発注管理
+  optimalStockQuantity    Int      @default(0) @map("optimal_stock_quantity")
+  orderPoint              Int      @default(0) @map("order_point")
+  lotSize                 Int      @default(0) @map("lot_size")
+
+  // 価格情報
+  costPrice               Decimal  @default(0) @map("cost_price") @db.Decimal(12, 2)
+  sellingPrice            Decimal  @default(0) @map("selling_price") @db.Decimal(12, 2)
+  stockValue              Decimal  @default(0) @map("stock_value") @db.Decimal(14, 2)
+  displayPrice            String?  @map("display_price") @db.VarChar(100)
+
+  // 区分・分類
+  productCategory         String?  @map("product_category") @db.VarChar(50)
+  productTag              String?  @map("product_tag") @db.VarChar(500)
+  handlingCategory        String?  @map("handling_category") @db.VarChar(50)
+
+  // メタ情報
+  isActive                Boolean  @default(true) @map("is_active")
+  importLogId             Int?     @map("import_log_id")
+  importedAt              DateTime @default(now()) @map("imported_at") @db.Timestamptz(6)
+  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client                  Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  importLog               ProductImportLog? @relation(fields: [importLogId], references: [id])
+
+  @@unique([clientId, productCode])
+  @@index([clientId, janCode])
+  @@index([clientId, supplierCode])
+  @@index([clientId, handlingCategory])
+  @@map("product_masters")
+}
+
+model ProductImportLog {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  fileName          String   @map("file_name") @db.VarChar(255)
+  fileSize          BigInt?  @map("file_size")
+  encoding          String?  @map("encoding") @db.VarChar(20)
+  importStatus      String   @map("import_status") @db.VarChar(20)
+  totalRows         Int?     @map("total_rows")
+  insertedRows      Int?     @map("inserted_rows")
+  updatedRows       Int?     @map("updated_rows")
+  errorRows         Int?     @map("error_rows")
+  errorDetails      Json?    @map("error_details")
+  importedBy        String?  @map("imported_by")
+  startedAt         DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  // Large file upload support
+  blobUrl           String?  @map("blob_url") @db.Text
+  lastProcessedRow  Int      @default(0) @map("last_processed_row")
+  processingStartedAt DateTime? @map("processing_started_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  products          ProductMaster[]
+
+  @@map("product_import_logs")
+}
+
+model ClientItemSyncSetting {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  syncEnabled       Boolean  @default(false) @map("sync_enabled")
+  syncFrequency     String?  @map("sync_frequency") @db.VarChar(20)
+  lastSyncAt        DateTime? @map("last_sync_at") @db.Timestamptz(6)
+  nextSyncAt        DateTime? @map("next_sync_at") @db.Timestamptz(6)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId])
+  @@map("client_item_sync_settings")
+}
+
+// ==========================================
+// Client CSV Column Mapping for Product Master
+// ==========================================
+
+model ClientProductColumnMapping {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @unique @map("client_id")
+
+  // CSV sample headers (up to 30 columns)
+  sampleHeaders     Json     @map("sample_headers")  // ["列1", "列2", ...]
+
+  // Column mappings: which CSV column maps to which system field
+  // Format: { "productCode": 0, "janCode": 5, "productName": 1, ... }
+  // Value is the column index (0-based) or null if not mapped
+  columnMappings    Json     @map("column_mappings")
+
+  // Metadata
+  sampleFileName    String?  @map("sample_file_name") @db.VarChar(255)
+  totalColumns      Int      @default(0) @map("total_columns")
+  isConfigured      Boolean  @default(false) @map("is_configured")
+  configuredBy      String?  @map("configured_by")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("client_product_column_mappings")
+}

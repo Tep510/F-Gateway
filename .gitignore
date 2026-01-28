@@ -39,7 +39,7 @@ yarn-error.log*
 next-env.d.ts
 
 # prisma
-/web/app/generated/prisma
+/app/generated/prisma
 
 # claude temp
 /private/
