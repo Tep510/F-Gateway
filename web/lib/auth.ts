@@ -50,7 +50,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (account && profile) {
         token.email = profile.email
         token.name = profile.name
-        token.role = "client"
+        const adminEmails = (process.env.ADMIN_EMAILS || "").split(",").map(e => e.trim().toLowerCase())
+        token.role = adminEmails.includes((profile.email || "").toLowerCase()) ? "admin" : "client"
       }
       return token
     },
