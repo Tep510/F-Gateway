@@ -60,11 +60,13 @@ F-GatewayのUIデザインは、**Vercel、Supabase、Linear**などの現代的
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│ [Logo] [Breadcrumb]              [Search]  [Theme]  [Account ▼]   │  # Header
+│ [Logo] [Breadcrumb]                             [Account ▼]        │  # Header
 ├────────────────────────────────────────────────────────────────────┤
 │ [Dashboard] [出庫] [入庫] [商品マスタ] [設定] ...                    │  # Navigation
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+> **注意:** 本システムでは検索機能は実装しません。シンプルなナビゲーションでの画面遷移を優先します。
 
 ### 左セクション（ブレッドクラム）
 
@@ -148,13 +150,13 @@ Vercelの「Scope Selector」を模倣し、クライアント/Adminの切り替
 
 ### 右セクション（ユーティリティ）
 
-ユーザーアカウントと設定を右端に配置します。
+ユーザーアカウントを右端に配置します。
 
 **構成要素:**
 
-1. **検索** - Command Menu起動（⌘K / Ctrl+K）
-2. **テーマ切り替え** - ライト/ダーク/システム
-3. **アカウントメニュー** - ユーザー名 + アバター + ドロップダウン
+1. **アカウントメニュー** - ユーザーのメールアドレス + ドロップダウン
+
+> **注意:** 検索機能とテーマ切り替えは本システムでは実装しません。
 
 **アカウントメニュー項目:**
 
@@ -308,24 +310,26 @@ Vercelスタイルのシンプルなテーブルデザイン:
 
 ---
 
-## Command Menu（⌘K）
+## Command Menu（⌘K）【将来実装】
 
-Vercelの**Command Menu**を実装し、キーボードのみで主要操作を完結できるようにします。
+> **注意:** 本システムでは検索機能・Command Menuは実装予定なし。将来の拡張可能性として設計情報のみ残しています。
 
-### 起動方法
+Vercelの**Command Menu**を参考にした設計です。
+
+### 起動方法（参考）
 
 - **Mac**: `⌘ + K`
 - **Windows/Linux**: `Ctrl + K`
 
-### 実装
+### 実装（参考）
 
-[cmdk](https://github.com/pacocoursey/cmdk)ライブラリを使用:
+[cmdk](https://github.com/pacocoursey/cmdk)ライブラリを使用する場合:
 
 ```tsx
 import { Command } from 'cmdk';
 
 <Command.Dialog open={open} onOpenChange={setOpen}>
-  <Command.Input placeholder="検索..." />
+  <Command.Input placeholder="コマンド入力..." />
   <Command.List>
     <Command.Group heading="ページ">
       <Command.Item onSelect={() => router.push('/client')}>
@@ -339,12 +343,10 @@ import { Command } from 'cmdk';
 </Command.Dialog>
 ```
 
-### 機能
+### 機能（参考）
 
 - **ページ遷移** - 全ページへのクイックアクセス
-- **ファイル検索** - CSVファイルを検索
 - **クライアント切り替え** - Scope切り替え
-- **テーマ変更** - ライト/ダーク切り替え
 
 ---
 
@@ -439,6 +441,7 @@ Vercelのような「**速くて邪魔にならない**」アニメーション�
 | 日付 | 版数 | 更新内容 | 更新者 |
 |------|------|---------|--------|
 | 2026-01-28 | 1.0 | 初版作成。Vercel/Supabase風のUIデザイン設計を策定 | Teppei & Claude |
+| 2026-01-28 | 1.1 | 検索機能・Command Menuを実装予定なしに変更。ヘッダーから検索アイコンを削除 | Teppei & Claude |
 
 ---
 
