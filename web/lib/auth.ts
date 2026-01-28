@@ -1,5 +1,6 @@
 import NextAuth from "next-auth"
 import Google from "next-auth/providers/google"
+import Credentials from "next-auth/providers/credentials"
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
@@ -15,14 +16,38 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         },
       },
     }),
+    Credentials({
+      name: "Dev Login",
+      credentials: {
+        role: { label: "Role", type: "text" },
+      },
+      async authorize(credentials) {
+        if (process.env.NODE_ENV === "production") return null
+        const role = (credentials?.role as string) || "client"
+        return {
+          id: `dev-${role}-001`,
+          email: `dev-${role}@friendslogi.com`,
+          name: `Dev ${role === "admin" ? "Admin" : "Client"}`,
+          role,
+          clientId: role === "client" ? "dev-client-001" : null,
+          clientCode: role === "client" ? "DEV001" : null,
+        }
+      },
+    }),
   ],
   callbacks: {
-    async jwt({ token, account, profile }) {
-      // Initial sign in
+    async jwt({ token, account, profile, user }) {
+      // Dev credentials login
+      if (account?.provider === "credentials" && user) {
+        token.email = user.email
+        token.name = user.name
+        token.role = (user as any).role
+        return token
+      }
+      // Google login
       if (account && profile) {
         token.email = profile.email
         token.name = profile.name
-        // Set default role for now (will be managed in database later)
         token.role = "client"
       }
       return token
