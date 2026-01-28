@@ -1,27 +1,120 @@
-import ModernHeader from '@/app/components/ModernHeader';
-import RoleGuard from '@/app/components/RoleGuard';
-import Card from '@/app/components/Card';
-import StatusBadge from '@/app/components/StatusBadge';
-import { auth } from '@/lib/auth';
-import { redirect } from 'next/navigation';
+'use client'
 
-export default async function ItemsPage() {
-  const session = await auth();
+import { useState, useRef, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
+import ModernHeader from '@/app/components/ModernHeader'
+import Card from '@/app/components/Card'
+import StatusBadge from '@/app/components/StatusBadge'
 
-  if (!session?.user) {
-    redirect('/');
+interface Product {
+  id: number
+  productCode: string
+  productName: string
+  productCategory: string | null
+  stockQuantity: number
+  updatedAt: string
+}
+
+interface ImportResult {
+  success: boolean
+  totalRows?: number
+  insertedRows?: number
+  updatedRows?: number
+  errorRows?: number
+  errors?: { row: number; error: string }[]
+  error?: string
+}
+
+export default function ItemsPage() {
+  const { data: session, status } = useSession()
+  const router = useRouter()
+  const [products, setProducts] = useState<Product[]>([])
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.replace('/')
+    }
+  }, [status, router])
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      fetchProducts()
+    }
+  }, [status])
+
+  const fetchProducts = async () => {
+    try {
+      const res = await fetch('/api/client/products')
+      if (res.ok) {
+        const data = await res.json()
+        setProducts(data.products || [])
+      }
+    } catch (error) {
+      console.error('Failed to fetch products:', error)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const mockItems = [
-    { id: 1, itemCode: 'ITEM-001', name: 'T恤 Mサイズ', category: '衣類', stock: 120, lastUpdated: '2026-01-27' },
-    { id: 2, itemCode: 'ITEM-002', name: 'T恤 Lサイズ', category: '衣類', stock: 85, lastUpdated: '2026-01-27' },
-    { id: 3, itemCode: 'ITEM-003', name: 'ポロシャツ S', category: '衣類', stock: 45, lastUpdated: '2026-01-26' },
-    { id: 4, itemCode: 'ITEM-004', name: 'ポロシャツ M', category: '衣類', stock: 62, lastUpdated: '2026-01-26' },
-    { id: 5, itemCode: 'ITEM-005', name: 'ジャケット M', category: '外套', stock: 23, lastUpdated: '2026-01-25' },
-    { id: 6, itemCode: 'ITEM-006', name: 'ジャケット L', category: '外套', stock: 18, lastUpdated: '2026-01-25' },
-    { id: 7, itemCode: 'ITEM-007', name: 'スラックス M', category: 'パンツ', stock: 34, lastUpdated: '2026-01-27' },
-    { id: 8, itemCode: 'ITEM-008', name: 'スラックス L', category: 'パンツ', stock: 29, lastUpdated: '2026-01-27' },
-  ];
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploading(true)
+    setImportResult(null)
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const res = await fetch('/api/client/import/products', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await res.json()
+      setImportResult(data)
+
+      if (data.success) {
+        // Refresh products list
+        fetchProducts()
+      }
+    } catch {
+      setImportResult({ success: false, error: 'アップロード中にエラーが発生しました' })
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  const categories = [...new Set(products.map(p => p.productCategory).filter(Boolean))]
+  const filteredProducts = products.filter(p => {
+    const matchesSearch = !searchTerm ||
+      p.productCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.productName.toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesCategory = !categoryFilter || p.productCategory === categoryFilter
+    return matchesSearch && matchesCategory
+  })
+
+  const totalStock = products.reduce((sum, p) => sum + p.stockQuantity, 0)
+
+  if (status === 'loading' || loading) {
+    return <div className="min-h-screen flex items-center justify-center text-gray-500">読み込み中...</div>
+  }
+
+  if (!session?.user) {
+    return null
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -30,7 +123,6 @@ export default async function ItemsPage() {
         userEmail={session.user.email || ""}
         role={session.user.role}
       />
-      <RoleGuard role="client" currentRole={session.user.role}>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-8 flex items-center justify-between">
@@ -40,8 +132,8 @@ export default async function ItemsPage() {
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right">
-              <div className="text-xs text-gray-500">最終更新</div>
-              <div className="text-sm font-medium text-gray-700">2026-01-27 14:30</div>
+              <div className="text-xs text-gray-500">総商品数</div>
+              <div className="text-sm font-medium text-gray-700">{products.length}件</div>
             </div>
             <StatusBadge status="success">同期済み</StatusBadge>
           </div>
@@ -52,23 +144,19 @@ export default async function ItemsPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div>
               <div className="text-sm text-gray-600">総商品数</div>
-              <div className="text-3xl font-bold text-gray-900 mt-1">{mockItems.length}品</div>
+              <div className="text-3xl font-bold text-gray-900 mt-1">{products.length}品</div>
             </div>
             <div>
               <div className="text-sm text-gray-600">アクティブ商品</div>
-              <div className="text-3xl font-bold text-green-600 mt-1">{mockItems.length}品</div>
+              <div className="text-3xl font-bold text-green-600 mt-1">{products.length}品</div>
             </div>
             <div>
               <div className="text-sm text-gray-600">カテゴリ数</div>
-              <div className="text-3xl font-bold text-blue-600 mt-1">
-                {new Set(mockItems.map(i => i.category)).size}種
-              </div>
+              <div className="text-3xl font-bold text-blue-600 mt-1">{categories.length}種</div>
             </div>
             <div>
               <div className="text-sm text-gray-600">累計在庫</div>
-              <div className="text-3xl font-bold text-purple-600 mt-1">
-                {mockItems.reduce((sum, i) => sum + i.stock, 0)}件
-              </div>
+              <div className="text-3xl font-bold text-purple-600 mt-1">{totalStock.toLocaleString()}件</div>
             </div>
           </div>
         </Card>
@@ -80,17 +168,25 @@ export default async function ItemsPage() {
               <input
                 type="text"
                 placeholder="商品コード・名称で検索"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 className="px-3 py-2 border border-gray-300 rounded text-sm w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                readOnly
               />
-              <select className="px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" defaultValue="">
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
                 <option value="">カテゴリ全て</option>
-                {[...new Set(mockItems.map(i => i.category))].map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
+                {categories.map(cat => (
+                  <option key={cat} value={cat || ''}>{cat}</option>
                 ))}
               </select>
             </div>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700">
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
+            >
               CSVインポート
             </button>
           </div>
@@ -104,30 +200,137 @@ export default async function ItemsPage() {
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">カテゴリ</th>
                   <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">在庫数</th>
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">最終更新</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {mockItems.map((item) => (
-                  <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-3 px-4 text-sm font-mono text-gray-900">{item.itemCode}</td>
-                    <td className="py-3 px-4 text-sm text-gray-700">{item.name}</td>
-                    <td className="py-3 px-4 text-sm">
-                      <span className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-600">{item.category}</span>
-                    </td>
-                    <td className="py-3 px-4 text-sm text-right font-medium text-gray-900">{item.stock}</td>
-                    <td className="py-3 px-4 text-sm text-gray-500">{item.lastUpdated}</td>
-                    <td className="py-3 px-4 text-sm">
-                      <button className="text-blue-600 hover:text-blue-800 text-sm">編集</button>
+                {filteredProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-gray-500">
+                      {products.length === 0 ? '商品データがありません。CSVインポートで登録してください。' : '該当する商品がありません'}
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredProducts.map((product) => (
+                    <tr key={product.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="py-3 px-4 text-sm font-mono text-gray-900">{product.productCode}</td>
+                      <td className="py-3 px-4 text-sm text-gray-700">{product.productName}</td>
+                      <td className="py-3 px-4 text-sm">
+                        {product.productCategory && (
+                          <span className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-600">
+                            {product.productCategory}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-right font-medium text-gray-900">
+                        {product.stockQuantity.toLocaleString()}
+                      </td>
+                      <td className="py-3 px-4 text-sm text-gray-500">
+                        {new Date(product.updatedAt).toLocaleDateString('ja-JP')}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </Card>
       </main>
-      </RoleGuard>
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">CSVインポート</h2>
+              <button
+                onClick={() => { setShowImportModal(false); setImportResult(null); }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="px-6 py-4">
+              {!importResult ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">CSVファイルを選択</label>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileSelect}
+                      disabled={uploading}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:opacity-50"
+                    />
+                  </div>
+
+                  {uploading && (
+                    <div className="flex items-center gap-3 text-blue-600">
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                      <span>インポート中...</span>
+                    </div>
+                  )}
+
+                  <div className="text-sm text-gray-500">
+                    <p className="font-medium mb-1">対応フォーマット:</p>
+                    <p>Shift-JIS / UTF-8 エンコーディングのCSV</p>
+                    <p className="mt-2 text-xs font-mono bg-gray-50 p-2 rounded">
+                      商品コード, 商品名, 在庫数, 原価, 売価, ...
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <StatusBadge status={importResult.success ? "success" : "error"}>
+                      {importResult.success ? "完了" : "エラー"}
+                    </StatusBadge>
+                    {importResult.error && <span className="text-red-600 text-sm">{importResult.error}</span>}
+                  </div>
+
+                  {importResult.success && (
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-gray-50 p-3 rounded text-center">
+                        <div className="text-xs text-gray-500">合計</div>
+                        <div className="text-lg font-semibold">{importResult.totalRows}</div>
+                      </div>
+                      <div className="bg-green-50 p-3 rounded text-center">
+                        <div className="text-xs text-gray-500">新規</div>
+                        <div className="text-lg font-semibold text-green-600">{importResult.insertedRows}</div>
+                      </div>
+                      <div className="bg-blue-50 p-3 rounded text-center">
+                        <div className="text-xs text-gray-500">更新</div>
+                        <div className="text-lg font-semibold text-blue-600">{importResult.updatedRows}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {importResult.errors && importResult.errors.length > 0 && (
+                    <div className="bg-red-50 rounded p-3 max-h-32 overflow-y-auto">
+                      <div className="text-sm font-medium text-red-700 mb-1">エラー詳細:</div>
+                      <ul className="text-xs text-red-600 space-y-1">
+                        {importResult.errors.map((err, i) => (
+                          <li key={i}>行 {err.row}: {err.error}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => { setShowImportModal(false); setImportResult(null); }}
+                    className="w-full px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
+                  >
+                    閉じる
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
+  )
 }
