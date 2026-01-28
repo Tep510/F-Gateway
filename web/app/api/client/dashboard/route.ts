@@ -63,6 +63,28 @@ export async function GET() {
       },
     })
 
+    // Get product import logs for the month
+    const productImportLogs = await prisma.productImportLog.findMany({
+      where: {
+        clientId,
+        startedAt: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+      },
+      select: {
+        importStatus: true,
+        startedAt: true,
+        completedAt: true,
+      },
+      orderBy: {
+        startedAt: 'desc',
+      },
+    })
+
+    // Get latest product import
+    const latestProductImport = productImportLogs.length > 0 ? productImportLogs[0] : null
+
     return NextResponse.json({
       client,
       monthlySummary: {
@@ -73,6 +95,13 @@ export async function GET() {
       itemMasterSync: {
         lastSyncAt: latestItemSync?.lastSyncAt || null,
         syncEnabled: latestItemSync?.syncEnabled || false,
+      },
+      productImport: {
+        lastImportAt: latestProductImport?.completedAt || latestProductImport?.startedAt || null,
+        importLogs: productImportLogs.map(log => ({
+          date: log.startedAt.toISOString().split('T')[0],
+          status: log.importStatus,
+        })),
       },
     })
   } catch (error) {

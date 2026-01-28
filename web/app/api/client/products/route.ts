@@ -33,8 +33,8 @@ export async function GET() {
         id: true,
         productCode: true,
         productName: true,
-        productCategory: true,
-        stockQuantity: true,
+        costPrice: true,
+        janCode: true,
         updatedAt: true,
       },
       orderBy: {

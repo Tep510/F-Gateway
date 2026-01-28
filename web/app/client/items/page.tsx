@@ -11,8 +11,8 @@ interface Product {
   id: number
   productCode: string
   productName: string
-  productCategory: string | null
-  stockQuantity: number
+  costPrice: number
+  janCode: string | null
   updatedAt: string
 }
 
@@ -35,7 +35,6 @@ export default function ItemsPage() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -97,16 +96,15 @@ export default function ItemsPage() {
     }
   }
 
-  const categories = [...new Set(products.map(p => p.productCategory).filter(Boolean))]
   const filteredProducts = products.filter(p => {
     const matchesSearch = !searchTerm ||
       p.productCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.productName.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesCategory = !categoryFilter || p.productCategory === categoryFilter
-    return matchesSearch && matchesCategory
+      p.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.janCode && p.janCode.toLowerCase().includes(searchTerm.toLowerCase()))
+    return matchesSearch
   })
 
-  const totalStock = products.reduce((sum, p) => sum + p.stockQuantity, 0)
+  const totalCostValue = products.reduce((sum, p) => sum + Number(p.costPrice), 0)
 
   if (status === 'loading' || loading) {
     return <div className="min-h-screen flex items-center justify-center text-gray-500">読み込み中...</div>
@@ -141,7 +139,7 @@ export default function ItemsPage() {
 
         {/* Summary */}
         <Card title="商品マスタサマリー" className="mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
               <div className="text-sm text-gray-600">総商品数</div>
               <div className="text-3xl font-bold text-gray-900 mt-1">{products.length}品</div>
@@ -151,12 +149,8 @@ export default function ItemsPage() {
               <div className="text-3xl font-bold text-green-600 mt-1">{products.length}品</div>
             </div>
             <div>
-              <div className="text-sm text-gray-600">カテゴリ数</div>
-              <div className="text-3xl font-bold text-blue-600 mt-1">{categories.length}種</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">累計在庫</div>
-              <div className="text-3xl font-bold text-purple-600 mt-1">{totalStock.toLocaleString()}件</div>
+              <div className="text-sm text-gray-600">原価合計</div>
+              <div className="text-3xl font-bold text-purple-600 mt-1">{totalCostValue.toLocaleString()}円</div>
             </div>
           </div>
         </Card>
@@ -164,25 +158,13 @@ export default function ItemsPage() {
         {/* Item List */}
         <Card title="商品一覧">
           <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <input
-                type="text"
-                placeholder="商品コード・名称で検索"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded text-sm w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <select
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">カテゴリ全て</option>
-                {categories.map(cat => (
-                  <option key={cat} value={cat || ''}>{cat}</option>
-                ))}
-              </select>
-            </div>
+            <input
+              type="text"
+              placeholder="商品コード・名称・JANコードで検索"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded text-sm w-72 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
             <button
               onClick={() => setShowImportModal(true)}
               className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
@@ -197,8 +179,8 @@ export default function ItemsPage() {
                 <tr className="border-b border-gray-200">
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">商品コード</th>
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">商品名</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">カテゴリ</th>
-                  <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">在庫数</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-gray-700">原価</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">JANコード</th>
                   <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">最終更新</th>
                 </tr>
               </thead>
@@ -214,15 +196,11 @@ export default function ItemsPage() {
                     <tr key={product.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-3 px-4 text-sm font-mono text-gray-900">{product.productCode}</td>
                       <td className="py-3 px-4 text-sm text-gray-700">{product.productName}</td>
-                      <td className="py-3 px-4 text-sm">
-                        {product.productCategory && (
-                          <span className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-600">
-                            {product.productCategory}
-                          </span>
-                        )}
-                      </td>
                       <td className="py-3 px-4 text-sm text-right font-medium text-gray-900">
-                        {product.stockQuantity.toLocaleString()}
+                        {Number(product.costPrice).toLocaleString()}円
+                      </td>
+                      <td className="py-3 px-4 text-sm font-mono text-gray-600">
+                        {product.janCode || '-'}
                       </td>
                       <td className="py-3 px-4 text-sm text-gray-500">
                         {new Date(product.updatedAt).toLocaleDateString('ja-JP')}
