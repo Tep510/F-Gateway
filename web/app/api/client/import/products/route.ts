@@ -29,6 +29,8 @@ const COLUMN_MAP: Record<string, string> = {
   'JANコード': 'janCode',
 }
 
+const BATCH_SIZE = 500
+
 function parseCSV(content: string): string[][] {
   const rows: string[][] = []
   let currentRow: string[] = []
@@ -95,6 +97,193 @@ function detectEncoding(buffer: Buffer): string {
   return sjisScore > utf8Score ? 'Shift_JIS' : 'utf-8'
 }
 
+interface ProductData {
+  clientId: number
+  productCode: string
+  productName: string
+  janCode: string | null
+  supplierCode: string | null
+  supplierName: string | null
+  stockQuantity: number
+  allocatedQuantity: number
+  freeStockQuantity: number
+  defectiveStockQuantity: number
+  shortageQuantity: number
+  orderRemainingQuantity: number
+  optimalStockQuantity: number
+  orderPoint: number
+  lotSize: number
+  costPrice: number
+  sellingPrice: number
+  stockValue: number
+  displayPrice: string | null
+  productCategory: string | null
+  productTag: string | null
+  handlingCategory: string | null
+  importLogId: number
+}
+
+async function batchUpsertProducts(products: ProductData[]): Promise<{ inserted: number; updated: number }> {
+  if (products.length === 0) return { inserted: 0, updated: 0 }
+
+  // Get existing product codes to count inserts vs updates
+  const productCodes = products.map(p => p.productCode)
+  const clientId = products[0].clientId
+
+  const existingProducts = await prisma.productMaster.findMany({
+    where: {
+      clientId,
+      productCode: { in: productCodes }
+    },
+    select: { productCode: true }
+  })
+  const existingCodes = new Set(existingProducts.map(p => p.productCode))
+
+  let inserted = 0
+  let updated = 0
+
+  // Build batch upsert using Prisma transaction with createMany fallback
+  await prisma.$transaction(async (tx) => {
+    for (const product of products) {
+      if (existingCodes.has(product.productCode)) {
+        await tx.productMaster.update({
+          where: {
+            clientId_productCode: {
+              clientId: product.clientId,
+              productCode: product.productCode,
+            }
+          },
+          data: {
+            productName: product.productName,
+            janCode: product.janCode,
+            supplierCode: product.supplierCode,
+            supplierName: product.supplierName,
+            stockQuantity: product.stockQuantity,
+            allocatedQuantity: product.allocatedQuantity,
+            freeStockQuantity: product.freeStockQuantity,
+            defectiveStockQuantity: product.defectiveStockQuantity,
+            shortageQuantity: product.shortageQuantity,
+            orderRemainingQuantity: product.orderRemainingQuantity,
+            optimalStockQuantity: product.optimalStockQuantity,
+            orderPoint: product.orderPoint,
+            lotSize: product.lotSize,
+            costPrice: product.costPrice,
+            sellingPrice: product.sellingPrice,
+            stockValue: product.stockValue,
+            displayPrice: product.displayPrice,
+            productCategory: product.productCategory,
+            productTag: product.productTag,
+            handlingCategory: product.handlingCategory,
+            importLogId: product.importLogId,
+          }
+        })
+        updated++
+      } else {
+        await tx.productMaster.create({
+          data: product
+        })
+        inserted++
+      }
+    }
+  }, {
+    timeout: 60000, // 60 second timeout for large batches
+  })
+
+  return { inserted, updated }
+}
+
+// Alternative: Raw SQL batch upsert for maximum performance
+async function batchUpsertProductsRaw(products: ProductData[]): Promise<{ inserted: number; updated: number }> {
+  if (products.length === 0) return { inserted: 0, updated: 0 }
+
+  const clientId = products[0].clientId
+
+  // Get existing count before upsert
+  const existingCount = await prisma.productMaster.count({
+    where: {
+      clientId,
+      productCode: { in: products.map(p => p.productCode) }
+    }
+  })
+
+  // Build VALUES clause for raw SQL
+  const values = products.map(p => {
+    const escape = (val: string | null) => val === null ? 'NULL' : `'${val.replace(/'/g, "''")}'`
+    return `(
+      ${p.clientId},
+      ${escape(p.productCode)},
+      ${escape(p.productName)},
+      ${escape(p.janCode)},
+      ${escape(p.supplierCode)},
+      ${escape(p.supplierName)},
+      ${p.stockQuantity},
+      ${p.allocatedQuantity},
+      ${p.freeStockQuantity},
+      ${p.defectiveStockQuantity},
+      ${p.shortageQuantity},
+      ${p.orderRemainingQuantity},
+      ${p.optimalStockQuantity},
+      ${p.orderPoint},
+      ${p.lotSize},
+      ${p.costPrice},
+      ${p.sellingPrice},
+      ${p.stockValue},
+      ${escape(p.displayPrice)},
+      ${escape(p.productCategory)},
+      ${escape(p.productTag)},
+      ${escape(p.handlingCategory)},
+      ${p.importLogId},
+      true,
+      NOW(),
+      NOW()
+    )`
+  }).join(',\n')
+
+  const sql = `
+    INSERT INTO product_masters (
+      client_id, product_code, product_name, jan_code,
+      supplier_code, supplier_name,
+      stock_quantity, allocated_quantity, free_stock_quantity,
+      defective_stock_quantity, shortage_quantity, order_remaining_quantity,
+      optimal_stock_quantity, order_point, lot_size,
+      cost_price, selling_price, stock_value,
+      display_price, product_category, product_tag, handling_category,
+      import_log_id, is_active, imported_at, updated_at
+    ) VALUES ${values}
+    ON CONFLICT (client_id, product_code)
+    DO UPDATE SET
+      product_name = EXCLUDED.product_name,
+      jan_code = EXCLUDED.jan_code,
+      supplier_code = EXCLUDED.supplier_code,
+      supplier_name = EXCLUDED.supplier_name,
+      stock_quantity = EXCLUDED.stock_quantity,
+      allocated_quantity = EXCLUDED.allocated_quantity,
+      free_stock_quantity = EXCLUDED.free_stock_quantity,
+      defective_stock_quantity = EXCLUDED.defective_stock_quantity,
+      shortage_quantity = EXCLUDED.shortage_quantity,
+      order_remaining_quantity = EXCLUDED.order_remaining_quantity,
+      optimal_stock_quantity = EXCLUDED.optimal_stock_quantity,
+      order_point = EXCLUDED.order_point,
+      lot_size = EXCLUDED.lot_size,
+      cost_price = EXCLUDED.cost_price,
+      selling_price = EXCLUDED.selling_price,
+      stock_value = EXCLUDED.stock_value,
+      display_price = EXCLUDED.display_price,
+      product_category = EXCLUDED.product_category,
+      product_tag = EXCLUDED.product_tag,
+      handling_category = EXCLUDED.handling_category,
+      import_log_id = EXCLUDED.import_log_id,
+      updated_at = NOW()
+  `
+
+  await prisma.$executeRawUnsafe(sql)
+
+  const updated = existingCount
+  const inserted = products.length - existingCount
+
+  return { inserted, updated }
+}
+
 export async function POST(request: Request) {
   try {
     const session = await auth()
@@ -117,7 +306,6 @@ export async function POST(request: Request) {
     }
 
     const clientId = user.clientId
-    const client = user.client
 
     const formData = await request.formData()
     const file = formData.get('file') as File | null
@@ -175,87 +363,65 @@ export async function POST(request: Request) {
       },
     })
 
-    // Process data rows
+    // Parse all data rows first (in-memory)
     const dataRows = rows.slice(1)
-    let insertedRows = 0
-    let updatedRows = 0
-    let errorRows = 0
+    const products: ProductData[] = []
     const errors: { row: number; error: string }[] = []
+    let errorRows = 0
 
+    const getValue = (row: string[], field: string): string => {
+      const idx = columnIndices[field]
+      return idx !== undefined ? (row[idx] || '').trim() : ''
+    }
+
+    const getIntValue = (row: string[], field: string): number => {
+      const val = getValue(row, field)
+      const num = parseInt(val, 10)
+      return isNaN(num) ? 0 : num
+    }
+
+    const getDecimalValue = (row: string[], field: string): number => {
+      const val = getValue(row, field)
+      const num = parseFloat(val)
+      return isNaN(num) ? 0 : num
+    }
+
+    // Parse all rows
     for (let i = 0; i < dataRows.length; i++) {
       const row = dataRows[i]
       try {
-        const getValue = (field: string): string => {
-          const idx = columnIndices[field]
-          return idx !== undefined ? (row[idx] || '').trim() : ''
-        }
-
-        const getIntValue = (field: string): number => {
-          const val = getValue(field)
-          const num = parseInt(val, 10)
-          return isNaN(num) ? 0 : num
-        }
-
-        const getDecimalValue = (field: string): number => {
-          const val = getValue(field)
-          const num = parseFloat(val)
-          return isNaN(num) ? 0 : num
-        }
-
-        const productCode = getValue('productCode')
+        const productCode = getValue(row, 'productCode')
         if (!productCode) {
           errors.push({ row: i + 2, error: '商品コードが空です' })
           errorRows++
           continue
         }
 
-        const productData = {
+        products.push({
           clientId,
           productCode,
-          productName: getValue('productName') || productCode,
-          janCode: getValue('janCode') || null,
-          supplierCode: getValue('supplierCode') || null,
-          supplierName: getValue('supplierName') || null,
-          stockQuantity: getIntValue('stockQuantity'),
-          allocatedQuantity: getIntValue('allocatedQuantity'),
-          freeStockQuantity: getIntValue('freeStockQuantity'),
-          defectiveStockQuantity: getIntValue('defectiveStockQuantity'),
-          shortageQuantity: getIntValue('shortageQuantity'),
-          orderRemainingQuantity: getIntValue('orderRemainingQuantity'),
-          optimalStockQuantity: getIntValue('optimalStockQuantity'),
-          orderPoint: getIntValue('orderPoint'),
-          lotSize: getIntValue('lotSize'),
-          costPrice: getDecimalValue('costPrice'),
-          sellingPrice: getDecimalValue('sellingPrice'),
-          stockValue: getDecimalValue('stockValue'),
-          displayPrice: getValue('displayPrice') || null,
-          productCategory: getValue('productCategory') || null,
-          productTag: getValue('productTag') || null,
-          handlingCategory: getValue('handlingCategory') || null,
+          productName: getValue(row, 'productName') || productCode,
+          janCode: getValue(row, 'janCode') || null,
+          supplierCode: getValue(row, 'supplierCode') || null,
+          supplierName: getValue(row, 'supplierName') || null,
+          stockQuantity: getIntValue(row, 'stockQuantity'),
+          allocatedQuantity: getIntValue(row, 'allocatedQuantity'),
+          freeStockQuantity: getIntValue(row, 'freeStockQuantity'),
+          defectiveStockQuantity: getIntValue(row, 'defectiveStockQuantity'),
+          shortageQuantity: getIntValue(row, 'shortageQuantity'),
+          orderRemainingQuantity: getIntValue(row, 'orderRemainingQuantity'),
+          optimalStockQuantity: getIntValue(row, 'optimalStockQuantity'),
+          orderPoint: getIntValue(row, 'orderPoint'),
+          lotSize: getIntValue(row, 'lotSize'),
+          costPrice: getDecimalValue(row, 'costPrice'),
+          sellingPrice: getDecimalValue(row, 'sellingPrice'),
+          stockValue: getDecimalValue(row, 'stockValue'),
+          displayPrice: getValue(row, 'displayPrice') || null,
+          productCategory: getValue(row, 'productCategory') || null,
+          productTag: getValue(row, 'productTag') || null,
+          handlingCategory: getValue(row, 'handlingCategory') || null,
           importLogId: importLog.id,
-        }
-
-        const existing = await prisma.productMaster.findUnique({
-          where: {
-            clientId_productCode: {
-              clientId,
-              productCode,
-            },
-          },
         })
-
-        if (existing) {
-          await prisma.productMaster.update({
-            where: { id: existing.id },
-            data: productData,
-          })
-          updatedRows++
-        } else {
-          await prisma.productMaster.create({
-            data: productData,
-          })
-          insertedRows++
-        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
         errors.push({ row: i + 2, error: message })
@@ -263,13 +429,38 @@ export async function POST(request: Request) {
       }
     }
 
+    // Process in batches using raw SQL for maximum performance
+    let totalInserted = 0
+    let totalUpdated = 0
+
+    for (let i = 0; i < products.length; i += BATCH_SIZE) {
+      const batch = products.slice(i, i + BATCH_SIZE)
+      try {
+        const { inserted, updated } = await batchUpsertProductsRaw(batch)
+        totalInserted += inserted
+        totalUpdated += updated
+      } catch (err) {
+        // If raw SQL fails, fall back to transaction-based approach
+        console.error('Raw SQL batch failed, falling back to transaction:', err)
+        try {
+          const { inserted, updated } = await batchUpsertProducts(batch)
+          totalInserted += inserted
+          totalUpdated += updated
+        } catch (fallbackErr) {
+          const message = fallbackErr instanceof Error ? fallbackErr.message : 'Batch error'
+          errors.push({ row: i + 2, error: `Batch error: ${message}` })
+          errorRows += batch.length
+        }
+      }
+    }
+
     // Update import log
     await prisma.productImportLog.update({
       where: { id: importLog.id },
       data: {
-        importStatus: errorRows > 0 && insertedRows + updatedRows === 0 ? 'failed' : 'completed',
-        insertedRows,
-        updatedRows,
+        importStatus: errorRows > 0 && totalInserted + totalUpdated === 0 ? 'failed' : 'completed',
+        insertedRows: totalInserted,
+        updatedRows: totalUpdated,
         errorRows,
         errorDetails: errors.length > 0 ? errors.slice(0, 100) : undefined,
         completedAt: new Date(),
@@ -280,8 +471,8 @@ export async function POST(request: Request) {
       success: true,
       importLogId: importLog.id,
       totalRows: dataRows.length,
-      insertedRows,
-      updatedRows,
+      insertedRows: totalInserted,
+      updatedRows: totalUpdated,
       errorRows,
       errors: errors.slice(0, 10),
     })
