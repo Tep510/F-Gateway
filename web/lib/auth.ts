@@ -1,11 +1,7 @@
 import NextAuth from "next-auth"
 import Google from "next-auth/providers/google"
-import { PrismaAdapter } from "@auth/prisma-adapter"
-import { prisma } from "@/lib/prisma"
-import type { Adapter } from "@auth/core/adapters"
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: PrismaAdapter(prisma) as Adapter,
   trustHost: true,
   providers: [
     Google({
@@ -21,50 +17,33 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
-    async session({ session, user }) {
-      // Attach user ID and role to session
+    async jwt({ token, account, profile }) {
+      // Initial sign in
+      if (account && profile) {
+        token.email = profile.email
+        token.name = profile.name
+        // Set default role for now (will be managed in database later)
+        token.role = "client"
+      }
+      return token
+    },
+    async session({ session, token }) {
+      // Add user info from token to session
       if (session.user) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: user.email! },
-          include: { client: true },
-        })
-
-        if (dbUser) {
-          session.user.id = dbUser.id.toString()
-          session.user.role = dbUser.role
-          session.user.clientId = dbUser.clientId?.toString() || null
-          session.user.clientCode = dbUser.client?.clientCode || null
-        }
+        session.user.email = token.email as string
+        session.user.name = token.name as string
+        session.user.role = token.role as string
+        session.user.id = token.sub as string
+        session.user.clientId = null
+        session.user.clientCode = null
       }
       return session
-    },
-    async signIn({ user, account, profile }) {
-      if (!user.email) return false
-
-      // Check if user exists
-      const existingUser = await prisma.user.findUnique({
-        where: { email: user.email },
-      })
-
-      // If user doesn't exist, create with default role
-      if (!existingUser) {
-        await prisma.user.create({
-          data: {
-            email: user.email,
-            name: user.name || null,
-            role: "client",
-            status: "active",
-          },
-        })
-      }
-
-      return true
     },
   },
   pages: {
     signIn: "/",
   },
   session: {
-    strategy: "database",
+    strategy: "jwt",
   },
 })
