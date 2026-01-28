@@ -79,6 +79,33 @@ export default function AdminLogs() {
     </Card>
   ) : null
 
+  const renderCsvConversions = () => logs.csvConversions?.length ? (
+    <Card title="CSV変換" className="mb-4">
+      <table className="w-full">
+        <thead><tr className="border-b border-gray-200">
+          <th className="text-left py-2 px-3 text-xs font-medium text-gray-600">クライアント</th>
+          <th className="text-left py-2 px-3 text-xs font-medium text-gray-600">ソースファイル</th>
+          <th className="text-left py-2 px-3 text-xs font-medium text-gray-600">ステータス</th>
+          <th className="text-right py-2 px-3 text-xs font-medium text-gray-600">総行数</th>
+          <th className="text-right py-2 px-3 text-xs font-medium text-gray-600">成功</th>
+          <th className="text-right py-2 px-3 text-xs font-medium text-gray-600">エラー</th>
+          <th className="text-left py-2 px-3 text-xs font-medium text-gray-600">日時</th>
+        </tr></thead>
+        <tbody>{logs.csvConversions.map(log => (
+          <tr key={log.id} className="border-b border-gray-100">
+            <td className="py-2 px-3 text-sm text-gray-700">{log.client.clientCode}</td>
+            <td className="py-2 px-3 text-sm text-gray-700 font-mono truncate max-w-[200px]" title={log.sourceFileName}>{log.sourceFileName}</td>
+            <td className="py-2 px-3 text-sm">{getStatusBadge(log.conversionStatus)}</td>
+            <td className="py-2 px-3 text-sm text-right text-gray-700">{log.totalRows?.toLocaleString() || "-"}</td>
+            <td className="py-2 px-3 text-sm text-right text-green-600">{log.successRows?.toLocaleString() || "-"}</td>
+            <td className="py-2 px-3 text-sm text-right text-red-600">{log.errorRows || "-"}</td>
+            <td className="py-2 px-3 text-sm text-gray-500">{new Date(log.startedAt).toLocaleString("ja-JP")}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </Card>
+  ) : null
+
   const renderFileTransfers = () => logs.fileTransfers?.length ? (
     <Card title="ファイル転送" className="mb-4">
       <table className="w-full">
@@ -203,6 +230,7 @@ export default function AdminLogs() {
         {/* Logs */}
         <div className="overflow-x-auto">
           {renderCsvUploads()}
+          {renderCsvConversions()}
           {renderProductImports()}
           {renderFileTransfers()}
           {renderAsanaNotifications()}

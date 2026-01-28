@@ -79,10 +79,17 @@ model Client {
   status                String    @default("active") @db.VarChar(20)
 
   // Google Drive Settings (4 folders per client)
-  shippingPlanDriveId   String?   @map("shipping_plan_drive_id") @db.VarChar(255)
-  shippingResultDriveId String?   @map("shipping_result_drive_id") @db.VarChar(255)
-  receivingPlanDriveId  String?   @map("receiving_plan_drive_id") @db.VarChar(255)
-  receivingResultDriveId String?  @map("receiving_result_drive_id") @db.VarChar(255)
+  shippingPlanDriveId      String?   @map("shipping_plan_drive_id") @db.VarChar(255)
+  shippingResultDriveId    String?   @map("shipping_result_drive_id") @db.VarChar(255)
+  receivingPlanDriveId     String?   @map("receiving_plan_drive_id") @db.VarChar(255)
+  receivingResultDriveId   String?   @map("receiving_result_drive_id") @db.VarChar(255)
+
+  // Google Drive Access Status (verified, error, pending, null)
+  shippingPlanDriveStatus   String?  @map("shipping_plan_drive_status") @db.VarChar(20)
+  shippingResultDriveStatus String?  @map("shipping_result_drive_status") @db.VarChar(20)
+  receivingPlanDriveStatus  String?  @map("receiving_plan_drive_status") @db.VarChar(20)
+  receivingResultDriveStatus String? @map("receiving_result_drive_status") @db.VarChar(20)
+  driveVerifiedAt           DateTime? @map("drive_verified_at") @db.Timestamptz(6)
 
   // Legacy fields (to be deprecated)
   googleDriveFolderId   String?   @map("google_drive_folder_id") @db.VarChar(255)

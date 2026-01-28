@@ -50,6 +50,34 @@ export default function AdminClients() {
     receivingResultDriveId: "",
   })
   const [saving, setSaving] = useState(false)
+  const [copiedEmail, setCopiedEmail] = useState(false)
+
+  // サービスアカウントメールアドレス（環境変数から取得、なければダミー）
+  const serviceAccountEmail = process.env.NEXT_PUBLIC_GOOGLE_SERVICE_ACCOUNT_EMAIL || "f-gateway@your-project.iam.gserviceaccount.com"
+
+  // Google DriveのURLからフォルダIDを抽出
+  const extractFolderId = (input: string): string => {
+    if (!input) return ""
+    // URLパターン: /folders/xxxxx
+    const folderMatch = input.match(/\/folders\/([a-zA-Z0-9_-]+)/)
+    if (folderMatch) return folderMatch[1]
+    // URLパターン: ?id=xxxxx
+    const idMatch = input.match(/[?&]id=([a-zA-Z0-9_-]+)/)
+    if (idMatch) return idMatch[1]
+    // フォルダIDのみ入力された場合
+    if (/^[a-zA-Z0-9_-]+$/.test(input)) return input
+    return input
+  }
+
+  const copyServiceAccountEmail = async () => {
+    try {
+      await navigator.clipboard.writeText(serviceAccountEmail)
+      setCopiedEmail(true)
+      setTimeout(() => setCopiedEmail(false), 2000)
+    } catch {
+      alert("コピーに失敗しました")
+    }
+  }
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/")
@@ -116,10 +144,10 @@ export default function AdminClients() {
         body: JSON.stringify({
           clientCode: editFormData.clientCode,
           clientName: editFormData.clientName,
-          shippingPlanDriveId: editFormData.shippingPlanDriveId || null,
-          shippingResultDriveId: editFormData.shippingResultDriveId || null,
-          receivingPlanDriveId: editFormData.receivingPlanDriveId || null,
-          receivingResultDriveId: editFormData.receivingResultDriveId || null,
+          shippingPlanDriveId: extractFolderId(editFormData.shippingPlanDriveId) || null,
+          shippingResultDriveId: extractFolderId(editFormData.shippingResultDriveId) || null,
+          receivingPlanDriveId: extractFolderId(editFormData.receivingPlanDriveId) || null,
+          receivingResultDriveId: extractFolderId(editFormData.receivingResultDriveId) || null,
         }),
       })
 
@@ -245,45 +273,71 @@ export default function AdminClients() {
 
                 <div className="border-t border-gray-200 pt-4">
                   <h4 className="text-sm font-medium text-gray-900 mb-3">Google Drive設定</h4>
-                  <div className="grid grid-cols-2 gap-4">
+
+                  {/* サービスアカウント情報 */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                    <div className="flex items-start gap-2">
+                      <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div className="flex-1">
+                        <p className="text-sm text-blue-800 font-medium mb-1">フォルダ共有が必要です</p>
+                        <p className="text-xs text-blue-700 mb-2">
+                          下記のサービスアカウントをGoogle Driveフォルダに「編集者」として共有してください。
+                        </p>
+                        <div className="flex items-center gap-2 bg-white rounded px-2 py-1.5">
+                          <code className="text-xs text-gray-700 flex-1 truncate">{serviceAccountEmail}</code>
+                          <button
+                            type="button"
+                            onClick={copyServiceAccountEmail}
+                            className="text-blue-600 hover:text-blue-800 text-xs font-medium flex-shrink-0"
+                          >
+                            {copiedEmail ? "コピー完了" : "コピー"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
                     <div>
-                      <label className="block text-sm text-gray-600 mb-1">出庫予定フォルダID</label>
+                      <label className="block text-sm text-gray-600 mb-1">出庫予定フォルダ（クライアント提出先）</label>
                       <input
                         type="text"
                         value={editFormData.shippingPlanDriveId}
                         onChange={e => setEditFormData(prev => ({ ...prev, shippingPlanDriveId: e.target.value }))}
-                        placeholder="Google DriveのフォルダID"
-                        className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                        placeholder="https://drive.google.com/drive/folders/... またはフォルダID"
+                        className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm text-gray-600 mb-1">出庫実績フォルダID</label>
+                      <label className="block text-sm text-gray-600 mb-1">出庫実績フォルダ（実績返却先）</label>
                       <input
                         type="text"
                         value={editFormData.shippingResultDriveId}
                         onChange={e => setEditFormData(prev => ({ ...prev, shippingResultDriveId: e.target.value }))}
-                        placeholder="Google DriveのフォルダID"
-                        className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                        placeholder="https://drive.google.com/drive/folders/... またはフォルダID"
+                        className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm text-gray-600 mb-1">入庫予定フォルダID</label>
+                      <label className="block text-sm text-gray-600 mb-1">入庫予定フォルダ（クライアント提出先）</label>
                       <input
                         type="text"
                         value={editFormData.receivingPlanDriveId}
                         onChange={e => setEditFormData(prev => ({ ...prev, receivingPlanDriveId: e.target.value }))}
-                        placeholder="Google DriveのフォルダID"
-                        className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                        placeholder="https://drive.google.com/drive/folders/... またはフォルダID"
+                        className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm text-gray-600 mb-1">入庫実績フォルダID</label>
+                      <label className="block text-sm text-gray-600 mb-1">入庫実績フォルダ（実績返却先）</label>
                       <input
                         type="text"
                         value={editFormData.receivingResultDriveId}
                         onChange={e => setEditFormData(prev => ({ ...prev, receivingResultDriveId: e.target.value }))}
-                        placeholder="Google DriveのフォルダID"
-                        className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                        placeholder="https://drive.google.com/drive/folders/... またはフォルダID"
+                        className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
                   </div>
