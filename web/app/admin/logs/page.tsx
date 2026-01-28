@@ -48,6 +48,7 @@ export default function AdminLogs() {
   const logTypeLabels: { [key: string]: string } = {
     all: "全ログ",
     csv_upload: "CSVアップロード",
+    product_import: "商品マスタ",
     csv_conversion: "CSV変換",
     file_transfer: "ファイル転送",
     asana_notification: "Asana通知",
@@ -143,6 +144,35 @@ export default function AdminLogs() {
     </Card>
   ) : null
 
+  const renderProductImports = () => logs.productImports?.length ? (
+    <Card title="商品マスタインポート" className="mb-4">
+      <table className="w-full">
+        <thead><tr className="border-b border-gray-200">
+          <th className="text-left py-2 px-3 text-xs font-medium text-gray-600">クライアント</th>
+          <th className="text-left py-2 px-3 text-xs font-medium text-gray-600">ファイル名</th>
+          <th className="text-left py-2 px-3 text-xs font-medium text-gray-600">ステータス</th>
+          <th className="text-right py-2 px-3 text-xs font-medium text-gray-600">総行数</th>
+          <th className="text-right py-2 px-3 text-xs font-medium text-gray-600">追加</th>
+          <th className="text-right py-2 px-3 text-xs font-medium text-gray-600">更新</th>
+          <th className="text-right py-2 px-3 text-xs font-medium text-gray-600">エラー</th>
+          <th className="text-left py-2 px-3 text-xs font-medium text-gray-600">日時</th>
+        </tr></thead>
+        <tbody>{logs.productImports.map(log => (
+          <tr key={log.id} className="border-b border-gray-100">
+            <td className="py-2 px-3 text-sm text-gray-700">{log.client.clientCode}</td>
+            <td className="py-2 px-3 text-sm text-gray-700 font-mono truncate max-w-[200px]" title={log.fileName}>{log.fileName}</td>
+            <td className="py-2 px-3 text-sm">{getStatusBadge(log.importStatus)}</td>
+            <td className="py-2 px-3 text-sm text-right text-gray-700">{log.totalRows?.toLocaleString() || "-"}</td>
+            <td className="py-2 px-3 text-sm text-right text-green-600">{log.insertedRows?.toLocaleString() || "-"}</td>
+            <td className="py-2 px-3 text-sm text-right text-blue-600">{log.updatedRows?.toLocaleString() || "-"}</td>
+            <td className="py-2 px-3 text-sm text-right text-red-600">{log.errorRows || "-"}</td>
+            <td className="py-2 px-3 text-sm text-gray-500">{new Date(log.startedAt).toLocaleString("ja-JP")}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </Card>
+  ) : null
+
   const hasAnyLogs = Object.values(logs).some(arr => arr?.length > 0)
 
   return (
@@ -173,6 +203,7 @@ export default function AdminLogs() {
         {/* Logs */}
         <div className="overflow-x-auto">
           {renderCsvUploads()}
+          {renderProductImports()}
           {renderFileTransfers()}
           {renderAsanaNotifications()}
           {renderItemImports()}

@@ -120,6 +120,25 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    if (logType === 'all' || logType === 'product_import') {
+      logs.productImports = await prisma.productImportLog.findMany({
+        where: whereClause,
+        include: {
+          client: {
+            select: {
+              clientCode: true,
+              clientName: true,
+            },
+          },
+        },
+        orderBy: {
+          startedAt: 'desc',
+        },
+        take: limit,
+        skip: offset,
+      })
+    }
+
     return NextResponse.json({ logs })
   } catch (error) {
     console.error('Admin logs API error:', error)
