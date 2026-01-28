@@ -59,10 +59,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (session.user) {
         session.user.email = token.email as string
         session.user.name = token.name as string
-        session.user.role = token.role as string
         session.user.id = token.sub as string
         session.user.clientId = (token.clientId as string) || null
         session.user.clientCode = (token.clientCode as string) || null
+        // Re-evaluate role on every session to pick up env var changes
+        if (token.clientId) {
+          session.user.role = token.role as string
+        } else {
+          const adminEmails = (process.env.ADMIN_EMAILS || "").split(",").map(e => e.trim().toLowerCase())
+          session.user.role = adminEmails.includes((session.user.email || "").toLowerCase()) ? "admin" : "client"
+        }
       }
       return session
     },
