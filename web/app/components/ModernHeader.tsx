@@ -33,6 +33,7 @@ export default function ModernHeader({ scope, userEmail, role }: ModernHeaderPro
   const adminNav = [
     { name: 'ダッシュボード', path: '/admin' },
     { name: 'クライアント', path: '/admin/clients' },
+    { name: 'インポート', path: '/admin/import' },
     { name: 'ユーザー', path: '/admin/users' },
     { name: 'ログ', path: '/admin/logs' },
     { name: '設定', path: '/admin/settings' },

@@ -102,6 +102,8 @@ model Client {
   itemImportLogs        ItemImportLog[]
   clientItemMasters     ClientItemMaster[]
   clientItemSyncSettings ClientItemSyncSetting[]
+  productMasters        ProductMaster[]
+  productImportLogs     ProductImportLog[]
 
   @@map("clients")
 }
@@ -335,6 +337,87 @@ model ClientItemMaster {
 
   @@unique([clientId, itemCode])
   @@map("client_item_masters")
+}
+
+// ==========================================
+// Product Master Tables (商品マスター)
+// ==========================================
+
+model ProductMaster {
+  id                      Int      @id @default(autoincrement())
+  clientId                Int      @map("client_id")
+
+  // 基本情報
+  productCode             String   @map("product_code") @db.VarChar(100)
+  productName             String   @map("product_name") @db.VarChar(500)
+  janCode                 String?  @map("jan_code") @db.VarChar(50)
+
+  // 仕入先情報
+  supplierCode            String?  @map("supplier_code") @db.VarChar(50)
+  supplierName            String?  @map("supplier_name") @db.VarChar(255)
+
+  // 在庫情報
+  stockQuantity           Int      @default(0) @map("stock_quantity")
+  allocatedQuantity       Int      @default(0) @map("allocated_quantity")
+  freeStockQuantity       Int      @default(0) @map("free_stock_quantity")
+  defectiveStockQuantity  Int      @default(0) @map("defective_stock_quantity")
+  shortageQuantity        Int      @default(0) @map("shortage_quantity")
+  orderRemainingQuantity  Int      @default(0) @map("order_remaining_quantity")
+
+  // 発注管理
+  optimalStockQuantity    Int      @default(0) @map("optimal_stock_quantity")
+  orderPoint              Int      @default(0) @map("order_point")
+  lotSize                 Int      @default(0) @map("lot_size")
+
+  // 価格情報
+  costPrice               Decimal  @default(0) @map("cost_price") @db.Decimal(12, 2)
+  sellingPrice            Decimal  @default(0) @map("selling_price") @db.Decimal(12, 2)
+  stockValue              Decimal  @default(0) @map("stock_value") @db.Decimal(14, 2)
+  displayPrice            String?  @map("display_price") @db.VarChar(100)
+
+  // 区分・分類
+  productCategory         String?  @map("product_category") @db.VarChar(50)
+  productTag              String?  @map("product_tag") @db.VarChar(500)
+  handlingCategory        String?  @map("handling_category") @db.VarChar(50)
+
+  // メタ情報
+  isActive                Boolean  @default(true) @map("is_active")
+  importLogId             Int?     @map("import_log_id")
+  importedAt              DateTime @default(now()) @map("imported_at") @db.Timestamptz(6)
+  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations
+  client                  Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  importLog               ProductImportLog? @relation(fields: [importLogId], references: [id])
+
+  @@unique([clientId, productCode])
+  @@index([clientId, janCode])
+  @@index([clientId, supplierCode])
+  @@index([clientId, handlingCategory])
+  @@map("product_masters")
+}
+
+model ProductImportLog {
+  id                Int      @id @default(autoincrement())
+  clientId          Int      @map("client_id")
+  fileName          String   @map("file_name") @db.VarChar(255)
+  fileSize          BigInt?  @map("file_size")
+  encoding          String?  @map("encoding") @db.VarChar(20)
+  importStatus      String   @map("import_status") @db.VarChar(20)
+  totalRows         Int?     @map("total_rows")
+  insertedRows      Int?     @map("inserted_rows")
+  updatedRows       Int?     @map("updated_rows")
+  errorRows         Int?     @map("error_rows")
+  errorDetails      Json?    @map("error_details")
+  importedBy        String?  @map("imported_by")
+  startedAt         DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  // Relations
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  products          ProductMaster[]
+
+  @@map("product_import_logs")
 }
 
 model ClientItemSyncSetting {

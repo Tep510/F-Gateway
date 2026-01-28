@@ -102,6 +102,22 @@ export async function POST(request: Request) {
         monthlyExecutionTime,
         createdBy: session.user.id,
       },
+      select: {
+        id: true,
+        clientCode: true,
+        clientName: true,
+        status: true,
+        asanaEnabled: true,
+        monthlyExecutionDay: true,
+        createdAt: true,
+        updatedAt: true,
+        _count: {
+          select: {
+            users: true,
+            csvUploadLogs: true,
+          },
+        },
+      },
     })
 
     return NextResponse.json({ client }, { status: 201 })
