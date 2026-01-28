@@ -77,8 +77,18 @@ model Client {
   clientCode            String    @unique @map("client_code") @db.VarChar(50)
   clientName            String    @map("client_name") @db.VarChar(255)
   status                String    @default("active") @db.VarChar(20)
+
+  // Google Drive Settings (4 folders per client)
+  shippingPlanDriveId   String?   @map("shipping_plan_drive_id") @db.VarChar(255)
+  shippingResultDriveId String?   @map("shipping_result_drive_id") @db.VarChar(255)
+  receivingPlanDriveId  String?   @map("receiving_plan_drive_id") @db.VarChar(255)
+  receivingResultDriveId String?  @map("receiving_result_drive_id") @db.VarChar(255)
+
+  // Legacy fields (to be deprecated)
   googleDriveFolderId   String?   @map("google_drive_folder_id") @db.VarChar(255)
   googleDriveFolderName String?   @map("google_drive_folder_name") @db.VarChar(255)
+
+  // Asana settings
   asanaProjectId        String?   @map("asana_project_id") @db.VarChar(100)
   asanaEnabled          Boolean   @default(false) @map("asana_enabled")
   monthlyExecutionDay   Int?      @map("monthly_execution_day")
