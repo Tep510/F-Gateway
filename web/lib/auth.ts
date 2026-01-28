@@ -42,6 +42,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.email = user.email
         token.name = user.name
         token.role = (user as any).role
+        token.clientId = (user as any).clientId
+        token.clientCode = (user as any).clientCode
         return token
       }
       // Google login
@@ -53,14 +55,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return token
     },
     async session({ session, token }) {
-      // Add user info from token to session
       if (session.user) {
         session.user.email = token.email as string
         session.user.name = token.name as string
         session.user.role = token.role as string
         session.user.id = token.sub as string
-        session.user.clientId = null
-        session.user.clientCode = null
+        session.user.clientId = (token.clientId as string) || null
+        session.user.clientCode = (token.clientCode as string) || null
       }
       return session
     },
