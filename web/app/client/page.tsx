@@ -1,4 +1,5 @@
 import ModernHeader from '@/app/components/ModernHeader';
+import RoleGuard from '@/app/components/RoleGuard';
 import Card from '@/app/components/Card';
 import StatusBadge from '@/app/components/StatusBadge';
 import { auth } from '@/lib/auth';
@@ -60,7 +61,9 @@ export default async function ClientDashboard() {
       <ModernHeader
         scope={session.user.clientCode || "Client"}
         userEmail={session.user.email || ""}
+        role={session.user.role}
       />
+      <RoleGuard role="client" currentRole={session.user.role}>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         {/* Page Title */}
@@ -180,6 +183,7 @@ export default async function ClientDashboard() {
           </a>
         </div>
       </main>
+      </RoleGuard>
     </div>
   );
 }

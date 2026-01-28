@@ -8,9 +8,10 @@ import { useState } from 'react';
 interface ModernHeaderProps {
   scope: string; // "DAQ" or "Admin"
   userEmail: string;
+  role?: string;
 }
 
-export default function ModernHeader({ scope, userEmail }: ModernHeaderProps) {
+export default function ModernHeader({ scope, userEmail, role }: ModernHeaderProps) {
   const pathname = usePathname();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
@@ -77,6 +78,16 @@ export default function ModernHeader({ scope, userEmail }: ModernHeaderProps) {
             {isUserMenuOpen && (
               <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
                 <div className="py-1">
+                  {role === 'admin' && (
+                    <Link href="/client" className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                      → クライアント画面へ
+                    </Link>
+                  )}
+                  {role === 'client' && (
+                    <Link href="/admin" className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                      → 管理者画面へ
+                    </Link>
+                  )}
                   <button
                     onClick={handleSignOut}
                     className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"

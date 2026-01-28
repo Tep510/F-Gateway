@@ -1,4 +1,5 @@
 import ModernHeader from '@/app/components/ModernHeader';
+import RoleGuard from '@/app/components/RoleGuard';
 import Card from '@/app/components/Card';
 import StatusBadge from '@/app/components/StatusBadge';
 import { auth } from '@/lib/auth';
@@ -9,11 +10,6 @@ export default async function AdminDashboard() {
 
   if (!session?.user) {
     redirect('/');
-  }
-
-  // Check if user is admin
-  if (session.user.role !== 'admin') {
-    redirect('/client');
   }
 
   // モックデータ
@@ -63,7 +59,8 @@ export default async function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <ModernHeader scope="Admin" userEmail={session.user.email || ""} />
+      <ModernHeader scope="Admin" userEmail={session.user.email || ""} role={session.user.role} />
+      <RoleGuard role="admin" currentRole={session.user.role}>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         {/* Page Title */}
@@ -159,6 +156,7 @@ export default async function AdminDashboard() {
           </div>
         </Card>
       </main>
+      </RoleGuard>
     </div>
   );
 }
