@@ -41,13 +41,14 @@ export default async function AdminDashboard() {
   const monthEnd = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59);
 
   // Fetch CSV upload logs for this month (shipping/receiving plans)
+  // Note: CsvUploadLog doesn't have csvType, so we check fileName for patterns
   const csvLogs = await prisma.csvUploadLog.findMany({
     where: {
       uploadedAt: { gte: monthStart, lte: monthEnd },
     },
     select: {
       clientId: true,
-      csvType: true,
+      fileName: true,
       uploadedAt: true,
     },
   });
@@ -70,8 +71,19 @@ export default async function AdminDashboard() {
 
   csvLogs.forEach(log => {
     const day = log.uploadedAt.getDate();
-    const type = log.csvType === 'receiving_plan' ? 'receiving' : 'shipping';
-    activityMap.set(`${log.clientId}-${day}-${type}`, true);
+    // Determine type from fileName pattern
+    const fileName = log.fileName.toLowerCase();
+    if (fileName.includes('入荷') || fileName.includes('receiving') || fileName.includes('入庫')) {
+      activityMap.set(`${log.clientId}-${day}-receiving`, true);
+    }
+    if (fileName.includes('出荷') || fileName.includes('shipping') || fileName.includes('出庫')) {
+      activityMap.set(`${log.clientId}-${day}-shipping`, true);
+    }
+    // If no pattern match, mark as shipping (default)
+    if (!fileName.includes('入荷') && !fileName.includes('receiving') && !fileName.includes('入庫') &&
+        !fileName.includes('出荷') && !fileName.includes('shipping') && !fileName.includes('出庫')) {
+      activityMap.set(`${log.clientId}-${day}-shipping`, true);
+    }
   });
 
   productLogs.forEach(log => {
