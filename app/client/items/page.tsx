@@ -156,7 +156,8 @@ export default function ItemsPage() {
     // Step 1: Upload to Vercel Blob
     setUploadProgress(0)
 
-    const blob = await upload(`client-products/${file.name}`, file, {
+    const timestamp = Date.now()
+    const blob = await upload(`client-products/${timestamp}-${file.name}`, file, {
       access: 'public',
       handleUploadUrl: '/api/client/import/products/init',
       onUploadProgress: (progress) => {
