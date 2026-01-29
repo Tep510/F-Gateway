@@ -2,11 +2,13 @@ import { inngest } from '../client'
 import { prisma } from '@/lib/prisma'
 import iconv from 'iconv-lite'
 import { log } from '@/lib/systemLog'
+import { Prisma } from '@/app/generated/prisma'
 
 // Rows per step (to stay within Vercel timeout)
-const ROWS_PER_STEP = 5000
+// Reduced to 1000 for faster processing per step
+const ROWS_PER_STEP = 1000
 // Batch size for database operations within a step
-const DB_BATCH_SIZE = 500
+const DB_BATCH_SIZE = 200
 
 /**
  * Inngest function to process product CSV imports in the background
@@ -260,7 +262,7 @@ export const processProductImport = inngest.createFunction(
 )
 
 /**
- * Process a batch of rows using transaction
+ * Process a batch of rows using PostgreSQL bulk upsert for maximum performance
  */
 async function processBatch(
   rows: string[][],
@@ -269,8 +271,6 @@ async function processBatch(
   clientId: number,
   importLogId: number
 ): Promise<{ inserted: number; updated: number; errors: { row: number; error: string }[] }> {
-  let inserted = 0
-  let updated = 0
   const errors: { row: number; error: string }[] = []
 
   const getValue = (row: string[], field: string): string => {
@@ -290,34 +290,50 @@ async function processBatch(
     return isNaN(num) ? 0 : num
   }
 
-  // Get existing products for this batch to determine insert vs update
-  const productCodes = rows
-    .map(row => getValue(row, 'productCode'))
-    .filter(code => code)
+  // Prepare valid rows for bulk insert
+  const validRows: Array<{
+    rowNum: number
+    data: {
+      clientId: number
+      productCode: string
+      productName: string
+      janCode: string | null
+      supplierCode: string | null
+      supplierName: string | null
+      stockQuantity: number
+      allocatedQuantity: number
+      freeStockQuantity: number
+      defectiveStockQuantity: number
+      shortageQuantity: number
+      orderRemainingQuantity: number
+      optimalStockQuantity: number
+      orderPoint: number
+      lotSize: number
+      costPrice: number
+      sellingPrice: number
+      stockValue: number
+      displayPrice: string | null
+      productCategory: string | null
+      productTag: string | null
+      handlingCategory: string | null
+      importLogId: number
+    }
+  }> = []
 
-  const existingProducts = await prisma.productMaster.findMany({
-    where: {
-      clientId,
-      productCode: { in: productCodes },
-    },
-    select: { productCode: true },
-  })
-
-  const existingCodes = new Set(existingProducts.map(p => p.productCode))
-
-  // Process rows
+  // Parse all rows and collect valid ones
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
-    const rowNum = startIndex + i + 2 // +2 for header and 0-index
+    const rowNum = startIndex + i + 2
 
-    try {
-      const productCode = getValue(row, 'productCode')
-      if (!productCode) {
-        errors.push({ row: rowNum, error: '商品コードが空です' })
-        continue
-      }
+    const productCode = getValue(row, 'productCode')
+    if (!productCode) {
+      errors.push({ row: rowNum, error: '商品コードが空です' })
+      continue
+    }
 
-      const productData = {
+    validRows.push({
+      rowNum,
+      data: {
         clientId,
         productCode,
         productName: getValue(row, 'productName') || productCode,
@@ -341,33 +357,99 @@ async function processBatch(
         productTag: getValue(row, 'productTag') || null,
         handlingCategory: getValue(row, 'handlingCategory') || null,
         importLogId,
-      }
+      },
+    })
+  }
 
-      if (existingCodes.has(productCode)) {
-        await prisma.productMaster.update({
-          where: {
-            clientId_productCode: {
-              clientId,
-              productCode,
-            },
-          },
-          data: productData,
-        })
-        updated++
-      } else {
-        await prisma.productMaster.create({
-          data: productData,
-        })
-        inserted++
-        existingCodes.add(productCode) // Prevent duplicates in same batch
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      errors.push({ row: rowNum, error: message })
+  if (validRows.length === 0) {
+    return { inserted: 0, updated: 0, errors }
+  }
+
+  // Get existing product codes to determine insert vs update count
+  const productCodes = validRows.map(r => r.data.productCode)
+  const existingProducts = await prisma.productMaster.findMany({
+    where: {
+      clientId,
+      productCode: { in: productCodes },
+    },
+    select: { productCode: true },
+  })
+  const existingCodes = new Set(existingProducts.map(p => p.productCode))
+
+  // Count inserts vs updates
+  let insertCount = 0
+  let updateCount = 0
+  for (const row of validRows) {
+    if (existingCodes.has(row.data.productCode)) {
+      updateCount++
+    } else {
+      insertCount++
     }
   }
 
-  return { inserted, updated, errors }
+  // Use PostgreSQL bulk upsert via raw SQL for maximum performance
+  try {
+    // Build values for bulk insert
+    const values = validRows.map((row, idx) => {
+      const d = row.data
+      return Prisma.sql`(
+        ${d.clientId}, ${d.productCode}, ${d.productName}, ${d.janCode},
+        ${d.supplierCode}, ${d.supplierName}, ${d.stockQuantity}, ${d.allocatedQuantity},
+        ${d.freeStockQuantity}, ${d.defectiveStockQuantity}, ${d.shortageQuantity},
+        ${d.orderRemainingQuantity}, ${d.optimalStockQuantity}, ${d.orderPoint},
+        ${d.lotSize}, ${d.costPrice}::decimal, ${d.sellingPrice}::decimal, ${d.stockValue}::decimal,
+        ${d.displayPrice}, ${d.productCategory}, ${d.productTag}, ${d.handlingCategory},
+        ${d.importLogId}, NOW(), NOW()
+      )`
+    })
+
+    // Join values with commas
+    const valuesList = Prisma.join(values, ',')
+
+    // Execute bulk upsert
+    await prisma.$executeRaw`
+      INSERT INTO "ProductMaster" (
+        "client_id", "product_code", "product_name", "jan_code",
+        "supplier_code", "supplier_name", "stock_quantity", "allocated_quantity",
+        "free_stock_quantity", "defective_stock_quantity", "shortage_quantity",
+        "order_remaining_quantity", "optimal_stock_quantity", "order_point",
+        "lot_size", "cost_price", "selling_price", "stock_value",
+        "display_price", "product_category", "product_tag", "handling_category",
+        "import_log_id", "created_at", "updated_at"
+      )
+      VALUES ${valuesList}
+      ON CONFLICT ("client_id", "product_code") DO UPDATE SET
+        "product_name" = EXCLUDED."product_name",
+        "jan_code" = EXCLUDED."jan_code",
+        "supplier_code" = EXCLUDED."supplier_code",
+        "supplier_name" = EXCLUDED."supplier_name",
+        "stock_quantity" = EXCLUDED."stock_quantity",
+        "allocated_quantity" = EXCLUDED."allocated_quantity",
+        "free_stock_quantity" = EXCLUDED."free_stock_quantity",
+        "defective_stock_quantity" = EXCLUDED."defective_stock_quantity",
+        "shortage_quantity" = EXCLUDED."shortage_quantity",
+        "order_remaining_quantity" = EXCLUDED."order_remaining_quantity",
+        "optimal_stock_quantity" = EXCLUDED."optimal_stock_quantity",
+        "order_point" = EXCLUDED."order_point",
+        "lot_size" = EXCLUDED."lot_size",
+        "cost_price" = EXCLUDED."cost_price",
+        "selling_price" = EXCLUDED."selling_price",
+        "stock_value" = EXCLUDED."stock_value",
+        "display_price" = EXCLUDED."display_price",
+        "product_category" = EXCLUDED."product_category",
+        "product_tag" = EXCLUDED."product_tag",
+        "handling_category" = EXCLUDED."handling_category",
+        "import_log_id" = EXCLUDED."import_log_id",
+        "updated_at" = NOW()
+    `
+
+    return { inserted: insertCount, updated: updateCount, errors }
+  } catch (err) {
+    // If bulk insert fails, add generic error
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    errors.push({ row: startIndex + 2, error: `バルク挿入エラー: ${message}` })
+    return { inserted: 0, updated: 0, errors }
+  }
 }
 
 /**
