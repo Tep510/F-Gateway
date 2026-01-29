@@ -1,5 +1,4 @@
 {
-  "project": "f-gateway",
   "crons": [
     {
       "path": "/api/cron/process-imports",
