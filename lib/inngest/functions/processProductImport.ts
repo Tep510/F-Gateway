@@ -3,14 +3,15 @@ import { prisma } from '@/lib/prisma'
 import iconv from 'iconv-lite'
 import { log } from '@/lib/systemLog'
 
-// Batch size for database operations
-const BATCH_SIZE = 500
-// Progress update interval (every N rows)
-const PROGRESS_UPDATE_INTERVAL = 500
+// Rows per step (to stay within Vercel timeout)
+const ROWS_PER_STEP = 5000
+// Batch size for database operations within a step
+const DB_BATCH_SIZE = 500
 
 /**
  * Inngest function to process product CSV imports in the background
  * This allows processing of large files (35MB+) without timeout issues
+ * Processing is split into multiple steps to avoid Vercel timeout
  */
 export const processProductImport = inngest.createFunction(
   {
@@ -150,70 +151,78 @@ export const processProductImport = inngest.createFunction(
       return indices
     })
 
-    // Step 4: Process CSV in batches (re-fetch and stream process)
-    const result = await step.run('process-csv-rows', async () => {
-      // Re-fetch CSV for processing
-      const response = await fetch(importLog.blobUrl)
-      if (!response.ok) {
-        throw new Error(`Failed to fetch CSV from blob: ${response.status}`)
-      }
+    // Calculate number of chunks needed
+    const numChunks = Math.ceil(csvMetadata.totalRows / ROWS_PER_STEP)
 
-      const arrayBuffer = await response.arrayBuffer()
-      const buffer = Buffer.from(arrayBuffer)
-      const content = iconv.decode(buffer, csvMetadata.encoding)
-      const rows = parseCSV(content)
+    // Process each chunk in a separate step
+    let totalInserted = 0
+    let totalUpdated = 0
+    let totalErrors = 0
 
-      const dataRows = rows.slice(1)
-      let insertedRows = 0
-      let updatedRows = 0
-      let errorRows = 0
-      const errors: { row: number; error: string }[] = []
-      let lastProcessedRow = 0
+    for (let chunkIndex = 0; chunkIndex < numChunks; chunkIndex++) {
+      const startRow = chunkIndex * ROWS_PER_STEP
+      const endRow = Math.min(startRow + ROWS_PER_STEP, csvMetadata.totalRows)
 
-      // Process in batches
-      for (let batchStart = 0; batchStart < dataRows.length; batchStart += BATCH_SIZE) {
-        const batchEnd = Math.min(batchStart + BATCH_SIZE, dataRows.length)
-        const batch = dataRows.slice(batchStart, batchEnd)
-
-        // Process batch using transaction for better performance
-        const batchResults = await processBatch(
-          batch,
-          batchStart,
-          columnIndices,
-          importLog.clientId,
-          importLogId
-        )
-
-        insertedRows += batchResults.inserted
-        updatedRows += batchResults.updated
-        errorRows += batchResults.errors.length
-
-        if (errors.length < 100) {
-          errors.push(...batchResults.errors.slice(0, 100 - errors.length))
+      // Each chunk is a separate step - this allows Inngest to checkpoint progress
+      const chunkResult = await step.run(`process-chunk-${chunkIndex}`, async () => {
+        // Fetch CSV for this chunk
+        const response = await fetch(importLog.blobUrl)
+        if (!response.ok) {
+          throw new Error(`Failed to fetch CSV from blob: ${response.status}`)
         }
 
-        lastProcessedRow = batchEnd
+        const arrayBuffer = await response.arrayBuffer()
+        const buffer = Buffer.from(arrayBuffer)
+        const content = iconv.decode(buffer, csvMetadata.encoding)
+        const allRows = parseCSV(content)
 
-        // Update progress
-        if (lastProcessedRow % PROGRESS_UPDATE_INTERVAL === 0 || batchEnd === dataRows.length) {
-          await prisma.productImportLog.update({
-            where: { id: importLogId },
-            data: {
-              lastProcessedRow,
-              insertedRows,
-              updatedRows,
-              errorRows,
-            },
-          })
+        // Get only the rows for this chunk (skip header, +1 offset)
+        const chunkRows = allRows.slice(startRow + 1, endRow + 1)
+
+        let inserted = 0
+        let updated = 0
+        let errors = 0
+
+        // Process in smaller DB batches
+        for (let batchStart = 0; batchStart < chunkRows.length; batchStart += DB_BATCH_SIZE) {
+          const batchEnd = Math.min(batchStart + DB_BATCH_SIZE, chunkRows.length)
+          const batch = chunkRows.slice(batchStart, batchEnd)
+
+          const batchResult = await processBatch(
+            batch,
+            startRow + batchStart,
+            columnIndices,
+            importLog.clientId,
+            importLogId
+          )
+
+          inserted += batchResult.inserted
+          updated += batchResult.updated
+          errors += batchResult.errors.length
         }
-      }
 
-      return { insertedRows, updatedRows, errorRows, errorsCount: errors.length, totalRows: dataRows.length }
-    })
+        // Update progress after this chunk
+        await prisma.productImportLog.update({
+          where: { id: importLogId },
+          data: {
+            lastProcessedRow: endRow,
+            insertedRows: { increment: inserted },
+            updatedRows: { increment: updated },
+            errorRows: { increment: errors },
+          },
+        })
 
-    // Step 5: Finalize import
+        return { inserted, updated, errors }
+      })
+
+      totalInserted += chunkResult.inserted
+      totalUpdated += chunkResult.updated
+      totalErrors += chunkResult.errors
+    }
+
+    // Final step: Finalize import
     await step.run('finalize-import', async () => {
-      const finalStatus = result.errorRows > 0 && result.insertedRows + result.updatedRows === 0
+      const finalStatus = totalErrors > 0 && totalInserted + totalUpdated === 0
         ? 'failed'
         : 'completed'
 
@@ -221,10 +230,6 @@ export const processProductImport = inngest.createFunction(
         where: { id: importLogId },
         data: {
           importStatus: finalStatus,
-          insertedRows: result.insertedRows,
-          updatedRows: result.updatedRows,
-          errorRows: result.errorRows,
-          lastProcessedRow: result.totalRows,
           completedAt: new Date(),
         },
       })
@@ -234,10 +239,10 @@ export const processProductImport = inngest.createFunction(
         clientId: importLog.clientId,
         metadata: {
           importLogId,
-          totalRows: result.totalRows,
-          insertedRows: result.insertedRows,
-          updatedRows: result.updatedRows,
-          errorRows: result.errorRows,
+          totalRows: csvMetadata.totalRows,
+          insertedRows: totalInserted,
+          updatedRows: totalUpdated,
+          errorRows: totalErrors,
           status: finalStatus,
         },
       })
@@ -246,10 +251,10 @@ export const processProductImport = inngest.createFunction(
     return {
       success: true,
       importLogId,
-      totalRows: result.totalRows,
-      insertedRows: result.insertedRows,
-      updatedRows: result.updatedRows,
-      errorRows: result.errorRows,
+      totalRows: csvMetadata.totalRows,
+      insertedRows: totalInserted,
+      updatedRows: totalUpdated,
+      errorRows: totalErrors,
     }
   }
 )
