@@ -408,7 +408,7 @@ async function processBatch(
 
     // Execute bulk upsert
     await prisma.$executeRaw`
-      INSERT INTO "ProductMaster" (
+      INSERT INTO "product_masters" (
         "client_id", "product_code", "product_name", "jan_code",
         "supplier_code", "supplier_name", "stock_quantity", "allocated_quantity",
         "free_stock_quantity", "defective_stock_quantity", "shortage_quantity",
