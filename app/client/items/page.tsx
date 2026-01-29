@@ -57,6 +57,19 @@ export default function ItemsPage() {
     const file = e.target.files?.[0]
     if (!file) return
 
+    // Check file size (4MB limit for direct upload)
+    const MAX_FILE_SIZE = 4 * 1024 * 1024 // 4MB
+    if (file.size > MAX_FILE_SIZE) {
+      setImportResult({
+        success: false,
+        error: `ファイルサイズが大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB）。4MB以下のファイルをご利用ください。大容量ファイルは管理者にお問い合わせください。`
+      })
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+      return
+    }
+
     setUploading(true)
     setImportResult(null)
 
@@ -69,6 +82,21 @@ export default function ItemsPage() {
         body: formData,
       })
 
+      if (!res.ok) {
+        const errorText = await res.text()
+        let errorMessage = 'サーバーエラーが発生しました'
+        try {
+          const errorJson = JSON.parse(errorText)
+          errorMessage = errorJson.error || errorMessage
+        } catch {
+          if (res.status === 413) {
+            errorMessage = 'ファイルサイズが大きすぎます。4MB以下のファイルをご利用ください。'
+          }
+        }
+        setImportResult({ success: false, error: errorMessage })
+        return
+      }
+
       const data = await res.json()
       setImportResult(data)
 
@@ -76,7 +104,7 @@ export default function ItemsPage() {
         mutate()
       }
     } catch {
-      setImportResult({ success: false, error: 'アップロード中にエラーが発生しました' })
+      setImportResult({ success: false, error: 'アップロード中にエラーが発生しました。ネットワーク接続を確認してください。' })
     } finally {
       setUploading(false)
       if (fileInputRef.current) {
@@ -251,6 +279,7 @@ export default function ItemsPage() {
                   <div className="text-sm text-gray-500 dark:text-gray-400">
                     <p className="font-medium mb-1">対応フォーマット:</p>
                     <p>Shift-JIS / UTF-8 エンコーディングのCSV</p>
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">※ファイルサイズ上限: 4MB</p>
                     <p className="mt-2 text-xs font-mono bg-gray-50 dark:bg-gray-800 p-2 rounded text-gray-700 dark:text-gray-300">
                       商品コード, 商品名, 在庫数, 原価, 売価, ...
                     </p>
