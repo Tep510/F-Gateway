@@ -415,7 +415,7 @@ async function processBatch(
         "order_remaining_quantity", "optimal_stock_quantity", "order_point",
         "lot_size", "cost_price", "selling_price", "stock_value",
         "display_price", "product_category", "product_tag", "handling_category",
-        "import_log_id", "created_at", "updated_at"
+        "import_log_id", "imported_at", "updated_at"
       )
       VALUES ${valuesList}
       ON CONFLICT ("client_id", "product_code") DO UPDATE SET
@@ -445,10 +445,9 @@ async function processBatch(
 
     return { inserted: insertCount, updated: updateCount, errors }
   } catch (err) {
-    // If bulk insert fails, add generic error
+    // Re-throw to fail the step - don't silently swallow errors
     const message = err instanceof Error ? err.message : 'Unknown error'
-    errors.push({ row: startIndex + 2, error: `バルク挿入エラー: ${message}` })
-    return { inserted: 0, updated: 0, errors }
+    throw new Error(`バルク挿入エラー: ${message}`)
   }
 }
 
