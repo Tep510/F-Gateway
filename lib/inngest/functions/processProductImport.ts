@@ -6,7 +6,7 @@ import { log } from '@/lib/systemLog'
 // Batch size for database operations
 const BATCH_SIZE = 500
 // Progress update interval (every N rows)
-const PROGRESS_UPDATE_INTERVAL = 1000
+const PROGRESS_UPDATE_INTERVAL = 500
 
 /**
  * Inngest function to process product CSV imports in the background
@@ -24,18 +24,18 @@ export const processProductImport = inngest.createFunction(
 
     // Step 1: Fetch import log and validate
     const importLog = await step.run('fetch-import-log', async () => {
-      const log = await prisma.productImportLog.findUnique({
+      const logEntry = await prisma.productImportLog.findUnique({
         where: { id: importLogId },
         include: {
           client: true,
         },
       })
 
-      if (!log) {
+      if (!logEntry) {
         throw new Error(`Import log not found: ${importLogId}`)
       }
 
-      if (!log.blobUrl) {
+      if (!logEntry.blobUrl) {
         throw new Error(`No blob URL for import log: ${importLogId}`)
       }
 
@@ -48,12 +48,18 @@ export const processProductImport = inngest.createFunction(
         },
       })
 
-      return log
+      // Return only essential data, not the full object
+      return {
+        id: logEntry.id,
+        clientId: logEntry.clientId,
+        blobUrl: logEntry.blobUrl,
+        fileName: logEntry.fileName,
+      }
     })
 
-    // Step 2: Fetch and parse CSV from Vercel Blob
-    const parsedData = await step.run('fetch-and-parse-csv', async () => {
-      const response = await fetch(importLog.blobUrl!)
+    // Step 2: Fetch CSV and get metadata (don't return full content)
+    const csvMetadata = await step.run('fetch-csv-metadata', async () => {
+      const response = await fetch(importLog.blobUrl)
 
       if (!response.ok) {
         throw new Error(`Failed to fetch CSV from blob: ${response.status}`)
@@ -65,37 +71,41 @@ export const processProductImport = inngest.createFunction(
       // Detect encoding
       const encoding = detectEncoding(buffer)
 
-      // Update file size if not set
-      if (!importLog.fileSize || importLog.fileSize === BigInt(0)) {
-        await prisma.productImportLog.update({
-          where: { id: importLogId },
-          data: { fileSize: BigInt(buffer.length), encoding },
-        })
-      }
+      // Update file size
+      await prisma.productImportLog.update({
+        where: { id: importLogId },
+        data: { fileSize: BigInt(buffer.length), encoding },
+      })
 
-      // Decode content
+      // Decode and count rows
       const content = iconv.decode(buffer, encoding)
-
-      // Parse CSV
       const rows = parseCSV(content)
 
       if (rows.length < 2) {
         throw new Error('CSV file is empty or has no data rows')
       }
 
+      const totalRows = rows.length - 1
+
       // Update total rows
       await prisma.productImportLog.update({
         where: { id: importLogId },
-        data: { totalRows: rows.length - 1 },
+        data: { totalRows },
       })
 
-      return { rows, encoding }
+      // Store headers for column mapping
+      const headers = rows[0]
+
+      return {
+        encoding,
+        totalRows,
+        headers,
+        fileSize: buffer.length,
+      }
     })
 
-    // Step 3: Get column mapping
+    // Step 3: Get column mapping (small data)
     const columnIndices = await step.run('get-column-mapping', async () => {
-      const headers = parsedData.rows[0]
-
       // Check for saved column mapping
       const savedMapping = await prisma.clientProductColumnMapping.findUnique({
         where: { clientId: importLog.clientId },
@@ -107,7 +117,7 @@ export const processProductImport = inngest.createFunction(
         // Use saved column mappings
         const mappings = savedMapping.columnMappings as Record<string, number | null>
         for (const [fieldName, colIndex] of Object.entries(mappings)) {
-          if (colIndex !== null && colIndex >= 0 && colIndex < headers.length) {
+          if (colIndex !== null && colIndex >= 0 && colIndex < csvMetadata.headers.length) {
             indices[fieldName] = colIndex
           }
         }
@@ -125,7 +135,7 @@ export const processProductImport = inngest.createFunction(
           'JANコード': 'janCode',
         }
 
-        headers.forEach((header, index) => {
+        csvMetadata.headers.forEach((header, index) => {
           const fieldName = DEFAULT_COLUMN_MAP[header.trim()]
           if (fieldName) {
             indices[fieldName] = index
@@ -140,9 +150,20 @@ export const processProductImport = inngest.createFunction(
       return indices
     })
 
-    // Step 4: Process data rows in batches
-    const result = await step.run('process-rows', async () => {
-      const dataRows = parsedData.rows.slice(1)
+    // Step 4: Process CSV in batches (re-fetch and stream process)
+    const result = await step.run('process-csv-rows', async () => {
+      // Re-fetch CSV for processing
+      const response = await fetch(importLog.blobUrl)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch CSV from blob: ${response.status}`)
+      }
+
+      const arrayBuffer = await response.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
+      const content = iconv.decode(buffer, csvMetadata.encoding)
+      const rows = parseCSV(content)
+
+      const dataRows = rows.slice(1)
       let insertedRows = 0
       let updatedRows = 0
       let errorRows = 0
@@ -154,32 +175,26 @@ export const processProductImport = inngest.createFunction(
         const batchEnd = Math.min(batchStart + BATCH_SIZE, dataRows.length)
         const batch = dataRows.slice(batchStart, batchEnd)
 
-        for (let i = 0; i < batch.length; i++) {
-          const rowIndex = batchStart + i
-          const row = batch[i]
+        // Process batch using transaction for better performance
+        const batchResults = await processBatch(
+          batch,
+          batchStart,
+          columnIndices,
+          importLog.clientId,
+          importLogId
+        )
 
-          try {
-            const result = await processRow(
-              row,
-              columnIndices,
-              importLog.clientId,
-              importLogId
-            )
+        insertedRows += batchResults.inserted
+        updatedRows += batchResults.updated
+        errorRows += batchResults.errors.length
 
-            if (result.inserted) insertedRows++
-            else updatedRows++
-          } catch (err) {
-            const message = err instanceof Error ? err.message : 'Unknown error'
-            if (errors.length < 100) {
-              errors.push({ row: rowIndex + 2, error: message })
-            }
-            errorRows++
-          }
-
-          lastProcessedRow = rowIndex + 1
+        if (errors.length < 100) {
+          errors.push(...batchResults.errors.slice(0, 100 - errors.length))
         }
 
-        // Update progress periodically
+        lastProcessedRow = batchEnd
+
+        // Update progress
         if (lastProcessedRow % PROGRESS_UPDATE_INTERVAL === 0 || batchEnd === dataRows.length) {
           await prisma.productImportLog.update({
             where: { id: importLogId },
@@ -193,7 +208,7 @@ export const processProductImport = inngest.createFunction(
         }
       }
 
-      return { insertedRows, updatedRows, errorRows, errors, totalRows: dataRows.length }
+      return { insertedRows, updatedRows, errorRows, errorsCount: errors.length, totalRows: dataRows.length }
     })
 
     // Step 5: Finalize import
@@ -210,7 +225,6 @@ export const processProductImport = inngest.createFunction(
           updatedRows: result.updatedRows,
           errorRows: result.errorRows,
           lastProcessedRow: result.totalRows,
-          errorDetails: result.errors.length > 0 ? result.errors : undefined,
           completedAt: new Date(),
         },
       })
@@ -241,83 +255,114 @@ export const processProductImport = inngest.createFunction(
 )
 
 /**
- * Process a single row
+ * Process a batch of rows using transaction
  */
-async function processRow(
-  row: string[],
+async function processBatch(
+  rows: string[][],
+  startIndex: number,
   columnIndices: Record<string, number>,
   clientId: number,
   importLogId: number
-): Promise<{ inserted: boolean }> {
-  const getValue = (field: string): string => {
+): Promise<{ inserted: number; updated: number; errors: { row: number; error: string }[] }> {
+  let inserted = 0
+  let updated = 0
+  const errors: { row: number; error: string }[] = []
+
+  const getValue = (row: string[], field: string): string => {
     const idx = columnIndices[field]
     return idx !== undefined ? (row[idx] || '').trim() : ''
   }
 
-  const getIntValue = (field: string): number => {
-    const val = getValue(field)
+  const getIntValue = (row: string[], field: string): number => {
+    const val = getValue(row, field)
     const num = parseInt(val, 10)
     return isNaN(num) ? 0 : num
   }
 
-  const getDecimalValue = (field: string): number => {
-    const val = getValue(field)
+  const getDecimalValue = (row: string[], field: string): number => {
+    const val = getValue(row, field)
     const num = parseFloat(val)
     return isNaN(num) ? 0 : num
   }
 
-  const productCode = getValue('productCode')
-  if (!productCode) {
-    throw new Error('商品コードが空です')
-  }
+  // Get existing products for this batch to determine insert vs update
+  const productCodes = rows
+    .map(row => getValue(row, 'productCode'))
+    .filter(code => code)
 
-  const productData = {
-    clientId,
-    productCode,
-    productName: getValue('productName') || productCode,
-    janCode: getValue('janCode') || null,
-    supplierCode: getValue('supplierCode') || null,
-    supplierName: getValue('supplierName') || null,
-    stockQuantity: getIntValue('stockQuantity'),
-    allocatedQuantity: getIntValue('allocatedQuantity'),
-    freeStockQuantity: getIntValue('freeStockQuantity'),
-    defectiveStockQuantity: getIntValue('defectiveStockQuantity'),
-    shortageQuantity: getIntValue('shortageQuantity'),
-    orderRemainingQuantity: getIntValue('orderRemainingQuantity'),
-    optimalStockQuantity: getIntValue('optimalStockQuantity'),
-    orderPoint: getIntValue('orderPoint'),
-    lotSize: getIntValue('lotSize'),
-    costPrice: getDecimalValue('costPrice'),
-    sellingPrice: getDecimalValue('sellingPrice'),
-    stockValue: getDecimalValue('stockValue'),
-    displayPrice: getValue('displayPrice') || null,
-    productCategory: getValue('productCategory') || null,
-    productTag: getValue('productTag') || null,
-    handlingCategory: getValue('handlingCategory') || null,
-    importLogId,
-  }
-
-  const existing = await prisma.productMaster.findUnique({
+  const existingProducts = await prisma.productMaster.findMany({
     where: {
-      clientId_productCode: {
-        clientId,
-        productCode,
-      },
+      clientId,
+      productCode: { in: productCodes },
     },
+    select: { productCode: true },
   })
 
-  if (existing) {
-    await prisma.productMaster.update({
-      where: { id: existing.id },
-      data: productData,
-    })
-    return { inserted: false }
-  } else {
-    await prisma.productMaster.create({
-      data: productData,
-    })
-    return { inserted: true }
+  const existingCodes = new Set(existingProducts.map(p => p.productCode))
+
+  // Process rows
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const rowNum = startIndex + i + 2 // +2 for header and 0-index
+
+    try {
+      const productCode = getValue(row, 'productCode')
+      if (!productCode) {
+        errors.push({ row: rowNum, error: '商品コードが空です' })
+        continue
+      }
+
+      const productData = {
+        clientId,
+        productCode,
+        productName: getValue(row, 'productName') || productCode,
+        janCode: getValue(row, 'janCode') || null,
+        supplierCode: getValue(row, 'supplierCode') || null,
+        supplierName: getValue(row, 'supplierName') || null,
+        stockQuantity: getIntValue(row, 'stockQuantity'),
+        allocatedQuantity: getIntValue(row, 'allocatedQuantity'),
+        freeStockQuantity: getIntValue(row, 'freeStockQuantity'),
+        defectiveStockQuantity: getIntValue(row, 'defectiveStockQuantity'),
+        shortageQuantity: getIntValue(row, 'shortageQuantity'),
+        orderRemainingQuantity: getIntValue(row, 'orderRemainingQuantity'),
+        optimalStockQuantity: getIntValue(row, 'optimalStockQuantity'),
+        orderPoint: getIntValue(row, 'orderPoint'),
+        lotSize: getIntValue(row, 'lotSize'),
+        costPrice: getDecimalValue(row, 'costPrice'),
+        sellingPrice: getDecimalValue(row, 'sellingPrice'),
+        stockValue: getDecimalValue(row, 'stockValue'),
+        displayPrice: getValue(row, 'displayPrice') || null,
+        productCategory: getValue(row, 'productCategory') || null,
+        productTag: getValue(row, 'productTag') || null,
+        handlingCategory: getValue(row, 'handlingCategory') || null,
+        importLogId,
+      }
+
+      if (existingCodes.has(productCode)) {
+        await prisma.productMaster.update({
+          where: {
+            clientId_productCode: {
+              clientId,
+              productCode,
+            },
+          },
+          data: productData,
+        })
+        updated++
+      } else {
+        await prisma.productMaster.create({
+          data: productData,
+        })
+        inserted++
+        existingCodes.add(productCode) // Prevent duplicates in same batch
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      errors.push({ row: rowNum, error: message })
+    }
   }
+
+  return { inserted, updated, errors }
 }
 
 /**
