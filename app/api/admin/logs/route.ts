@@ -3,6 +3,23 @@ import { prisma } from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import { NextRequest } from 'next/server'
 
+// Convert BigInt to Number and preserve Date for JSON serialization
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function serializeForJson(obj: any): any {
+  if (obj === null || obj === undefined) return obj
+  if (typeof obj === 'bigint') return Number(obj)
+  if (obj instanceof Date) return obj.toISOString()
+  if (Array.isArray(obj)) return obj.map(serializeForJson)
+  if (typeof obj === 'object') {
+    const result: Record<string, unknown> = {}
+    for (const key in obj) {
+      result[key] = serializeForJson(obj[key])
+    }
+    return result
+  }
+  return obj
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = await auth()
@@ -139,11 +156,13 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    return NextResponse.json({ logs })
+    // Convert BigInt values to numbers for JSON serialization
+    return NextResponse.json({ logs: serializeForJson(logs) })
   } catch (error) {
-    console.error('Admin logs API error:', error)
+    const err = error instanceof Error ? error : new Error(String(error))
+    console.error('Admin logs API error:', err.message, err.stack)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: `ログ取得エラー: ${err.message}` },
       { status: 500 }
     )
   }

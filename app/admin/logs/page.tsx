@@ -59,6 +59,7 @@ export default function AdminLogs() {
   useEffect(() => {
     if (status !== "authenticated") return
     setLoading(true)
+    setError(null)
 
     if (logType === "system_log") {
       // Fetch system logs
@@ -67,8 +68,12 @@ export default function AdminLogs() {
       if (systemLogCategory) params.set("category", systemLogCategory)
 
       fetch(`/api/admin/logs/system?${params}`)
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+          return res.json()
+        })
         .then(data => {
+          if (data.error) throw new Error(data.error)
           setSystemLogs(data.logs || [])
           setSystemLogStats(data.stats || { categories: {}, levels: {} })
           setLoading(false)
@@ -77,8 +82,15 @@ export default function AdminLogs() {
     } else {
       // Fetch legacy logs
       fetch(`/api/admin/logs?type=${logType}&limit=30`)
-        .then(res => res.json())
-        .then(data => { setLogs(data.logs || {}); setLoading(false) })
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+          return res.json()
+        })
+        .then(data => {
+          if (data.error) throw new Error(data.error)
+          setLogs(data.logs || {})
+          setLoading(false)
+        })
         .catch(err => { setError(err.message); setLoading(false) })
     }
   }, [status, logType, systemLogLevel, systemLogCategory])
