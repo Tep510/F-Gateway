@@ -67,10 +67,18 @@ export async function POST(request: Request) {
     return NextResponse.json(jsonResponse)
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error))
-    console.error('Client upload init error:', error)
+    console.error('Client upload init error:', {
+      message: err.message,
+      stack: err.stack,
+      error,
+    })
 
+    // Return error in a format the Blob SDK might expect
     return NextResponse.json(
-      { error: err.message || 'Internal server error' },
+      {
+        error: err.message || 'Internal server error',
+        details: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+      },
       { status: 500 }
     )
   }
