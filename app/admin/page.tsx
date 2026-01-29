@@ -31,9 +31,9 @@ export default async function AdminDashboard() {
 
   // Fetch all active clients
   const clients = await prisma.client.findMany({
-    where: { isActive: true },
-    orderBy: { code: 'asc' },
-    select: { id: true, code: true, name: true },
+    where: { status: 'active' },
+    orderBy: { clientCode: 'asc' },
+    select: { id: true, clientCode: true, clientName: true },
   });
 
   // Date range for this month
@@ -113,7 +113,7 @@ export default async function AdminDashboard() {
                       colSpan={3}
                       className="py-2 px-1 text-center text-xs font-bold text-gray-900 dark:text-white border-l border-gray-200 dark:border-gray-700"
                     >
-                      {client.code}
+                      {client.clientCode}
                     </th>
                   ))}
                 </tr>
