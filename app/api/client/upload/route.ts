@@ -2,6 +2,8 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import iconv from 'iconv-lite'
+import { uploadCsvToDrive, isDriveConfigured } from '@/lib/google-drive'
+import { log, generateRequestId } from '@/lib/systemLog'
 
 function detectEncoding(buffer: Buffer): string {
   if (buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
@@ -26,6 +28,8 @@ function countCsvRows(content: string): number {
 }
 
 export async function POST(request: Request) {
+  const requestId = generateRequestId()
+
   try {
     const session = await auth()
 
@@ -81,16 +85,93 @@ export async function POST(request: Request) {
     const prefix = uploadType === 'shipping' ? 'shukka' : 'nyuka'
     const newFileName = `${prefix}_${user.client.clientCode}_${timestamp}.csv`
 
-    // For now, save upload log to database
-    // TODO: Upload to Google Drive
+    await log.info('csv_upload', 'upload_start', `CSVアップロード開始: ${file.name} -> ${newFileName}`, {
+      clientId,
+      userId: user.id,
+      requestId,
+      metadata: {
+        originalFileName: file.name,
+        newFileName,
+        uploadType,
+        fileSize: file.size,
+        rowCount,
+        encoding,
+      },
+    })
+
+    // Check if Google Drive is configured
+    const driveConfig = await isDriveConfigured()
+    let googleDriveFileId = `local_${timestamp}` // Default if Drive not configured
+    let driveUploadSuccess = false
+    let driveUploadError: string | undefined
+
+    if (driveConfig.configured) {
+      // Upload to Google Drive
+      const driveResult = await uploadCsvToDrive(
+        newFileName,
+        buffer, // Upload original buffer to preserve encoding
+        uploadType as 'shipping' | 'receiving',
+        clientId,
+        requestId
+      )
+
+      if (driveResult.success && driveResult.fileId) {
+        googleDriveFileId = driveResult.fileId
+        driveUploadSuccess = true
+      } else {
+        driveUploadError = driveResult.error
+        // Log warning but don't fail the upload - save to DB anyway
+        await log.warn('csv_upload', 'drive_upload_failed', `Google Driveアップロード失敗、ローカル保存のみ: ${newFileName}`, {
+          clientId,
+          requestId,
+          metadata: { error: driveResult.error },
+        })
+      }
+    } else {
+      await log.warn('csv_upload', 'drive_not_configured', 'Google Driveが未設定のためローカル保存のみ', {
+        clientId,
+        requestId,
+        metadata: {
+          hasCredentials: driveConfig.hasCredentials,
+          hasShippingFolder: driveConfig.hasShippingFolder,
+          hasReceivingFolder: driveConfig.hasReceivingFolder,
+        },
+      })
+    }
+
+    // Save upload log to database
     const uploadLog = await prisma.csvUploadLog.create({
       data: {
         clientId,
-        googleDriveFileId: `pending_${timestamp}`, // Placeholder until Google Drive integration
+        googleDriveFileId,
         fileName: newFileName,
         fileSize: BigInt(file.size),
         rowCount,
-        uploadStatus: 'completed',
+        uploadStatus: driveUploadSuccess ? 'completed' : 'pending_transfer',
+        errorMessage: driveUploadError || null,
+      },
+    })
+
+    // Record file transfer if Drive upload was successful
+    if (driveUploadSuccess) {
+      await prisma.fileTransfer.create({
+        data: {
+          clientId,
+          sourceFileId: `upload_${uploadLog.id}`,
+          targetFileId: googleDriveFileId,
+          transferStatus: 'completed',
+          transferType: uploadType === 'shipping' ? 'shipping_plan' : 'receiving_plan',
+        },
+      })
+    }
+
+    await log.info('csv_upload', 'upload_complete', `CSVアップロード完了: ${newFileName}`, {
+      clientId,
+      requestId,
+      metadata: {
+        uploadId: uploadLog.id,
+        googleDriveFileId,
+        driveUploadSuccess,
       },
     })
 
@@ -103,10 +184,20 @@ export async function POST(request: Request) {
       fileSize: file.size,
       encoding,
       uploadType,
-      message: `${uploadType === 'shipping' ? '出庫' : '入庫'}CSVをアップロードしました`,
+      googleDriveFileId: driveUploadSuccess ? googleDriveFileId : null,
+      driveUploadSuccess,
+      message: driveUploadSuccess
+        ? `${uploadType === 'shipping' ? '出庫予定' : '入庫予定'}CSVをGoogle Driveにアップロードしました`
+        : `${uploadType === 'shipping' ? '出庫予定' : '入庫予定'}CSVを保存しました（Google Drive転送は保留中）`,
     })
   } catch (error) {
-    console.error('CSV upload error:', error)
+    const err = error instanceof Error ? error : new Error(String(error))
+    console.error('CSV upload error:', err)
+
+    await log.error('csv_upload', 'upload_error', 'CSVアップロードエラー', err, {
+      requestId,
+    })
+
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -161,6 +252,9 @@ export async function GET(request: Request) {
         status: log.uploadStatus,
         uploadedAt: log.uploadedAt.toISOString(),
         errorMessage: log.errorMessage,
+        googleDriveFileId: log.googleDriveFileId.startsWith('local_') || log.googleDriveFileId.startsWith('pending_')
+          ? null
+          : log.googleDriveFileId,
       })),
     })
   } catch (error) {

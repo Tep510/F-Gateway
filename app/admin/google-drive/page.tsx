@@ -28,6 +28,8 @@ export default function AdminGoogleDrive() {
   const [driveLoading, setDriveLoading] = useState(true)
   const [driveSaving, setDriveSaving] = useState(false)
   const [copiedEmail, setCopiedEmail] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string; folderTests?: Record<string, { configured: boolean; accessible?: boolean; error?: string }> } | null>(null)
+  const [testing, setTesting] = useState(false)
 
   const serviceAccountEmail = "script@friendslogi.com"
 
@@ -109,6 +111,29 @@ export default function AdminGoogleDrive() {
   }
 
   const isConfigured = (folderId: string) => !!folderId && folderId.length > 0
+
+  const testConnection = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const res = await fetch("/api/admin/settings/google-drive/test", {
+        method: "POST",
+      })
+      const data = await res.json()
+      setTestResult({
+        success: data.success,
+        message: data.message || data.error,
+        folderTests: data.folderTests,
+      })
+    } catch {
+      setTestResult({
+        success: false,
+        message: "接続テスト中にエラーが発生しました",
+      })
+    } finally {
+      setTesting(false)
+    }
+  }
 
   if (status === "loading") return <div className="min-h-screen flex items-center justify-center text-gray-500 dark:text-gray-400 bg-white dark:bg-black">読み込み中...</div>
 
@@ -234,7 +259,14 @@ export default function AdminGoogleDrive() {
                   </div>
                 </div>
 
-                <div className="flex justify-end pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex justify-between items-center pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <button
+                    onClick={testConnection}
+                    disabled={testing}
+                    className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    {testing ? "テスト中..." : "接続テスト"}
+                  </button>
                   <button
                     onClick={saveDriveSettings}
                     disabled={driveSaving}
@@ -243,6 +275,38 @@ export default function AdminGoogleDrive() {
                     {driveSaving ? "保存中..." : "設定を保存"}
                   </button>
                 </div>
+
+                {testResult && (
+                  <div className={`mt-4 p-4 rounded-lg ${testResult.success ? "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800" : "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800"}`}>
+                    <div className={`text-sm font-medium ${testResult.success ? "text-green-800 dark:text-green-300" : "text-red-800 dark:text-red-300"}`}>
+                      {testResult.success ? "接続成功" : "接続エラー"}
+                    </div>
+                    <div className={`text-sm mt-1 ${testResult.success ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400"}`}>
+                      {testResult.message}
+                    </div>
+                    {testResult.folderTests && (
+                      <div className="mt-3 space-y-2">
+                        {Object.entries(testResult.folderTests).map(([key, value]) => (
+                          <div key={key} className="flex items-center gap-2 text-xs">
+                            <span className={`w-4 h-4 rounded-full flex items-center justify-center ${
+                              !value.configured ? "bg-gray-300 dark:bg-gray-600" :
+                              value.accessible ? "bg-green-500" : "bg-red-500"
+                            }`}>
+                              {value.configured && (value.accessible ? "✓" : "×")}
+                            </span>
+                            <span className="text-gray-700 dark:text-gray-300">
+                              {key === "shippingPlan" ? "出庫予定" :
+                               key === "shippingResult" ? "出庫実績" :
+                               key === "receivingPlan" ? "入庫予定" : "入庫実績"}:
+                              {!value.configured ? " 未設定" :
+                               value.accessible ? " アクセス可能" : ` エラー: ${value.error}`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </Card>
