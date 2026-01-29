@@ -5,10 +5,19 @@ import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
 
 // Client upload token generation for client users
 export async function POST(request: Request) {
+  console.log('[Client Upload Init] Starting...')
+
   try {
     const session = await auth()
+    console.log('[Client Upload Init] Session:', {
+      hasSession: !!session,
+      hasUser: !!session?.user,
+      email: session?.user?.email,
+      userId: session?.user?.id,
+    })
 
     if (!session?.user?.email) {
+      console.log('[Client Upload Init] No session or email - returning 401')
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -17,8 +26,14 @@ export async function POST(request: Request) {
       where: { email: session.user.email },
       include: { client: true },
     })
+    console.log('[Client Upload Init] User lookup:', {
+      found: !!user,
+      clientId: user?.clientId,
+      hasClient: !!user?.client,
+    })
 
     if (!user?.clientId || !user.client) {
+      console.log('[Client Upload Init] User not associated with client - returning 403')
       return NextResponse.json(
         { error: 'クライアントに紐付けられていません' },
         { status: 403 }
@@ -26,16 +41,19 @@ export async function POST(request: Request) {
     }
 
     const clientId = user.clientId
-    const userId = session.user.id
+    const userId = session.user.id || user.id
 
-    // Clone request to read body without consuming original
+    console.log('[Client Upload Init] Parsing request body...')
     const body = await request.json() as HandleUploadBody
+    console.log('[Client Upload Init] Body type:', body?.type)
 
+    console.log('[Client Upload Init] Calling handleUpload...')
     // Handle Vercel Blob client upload
     const jsonResponse = await handleUpload({
       body,
       request,
-      onBeforeGenerateToken: async () => {
+      onBeforeGenerateToken: async (pathname) => {
+        console.log('[Client Upload Init] onBeforeGenerateToken called, pathname:', pathname)
         return {
           allowedContentTypes: ['text/csv', 'application/vnd.ms-excel', 'text/plain'],
           maximumSizeInBytes: 100 * 1024 * 1024, // 100MB limit
@@ -46,6 +64,7 @@ export async function POST(request: Request) {
         }
       },
       onUploadCompleted: async ({ blob, tokenPayload }) => {
+        console.log('[Client Upload Init] onUploadCompleted called, blob url:', blob.url)
         // Parse token payload
         const payload = JSON.parse(tokenPayload || '{}')
         const { clientId: cId, userId: uId } = payload
@@ -61,9 +80,11 @@ export async function POST(request: Request) {
             importedBy: uId,
           },
         })
+        console.log('[Client Upload Init] Import log created')
       },
     })
 
+    console.log('[Client Upload Init] Success, response type:', jsonResponse?.type)
     return NextResponse.json(jsonResponse)
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error))
