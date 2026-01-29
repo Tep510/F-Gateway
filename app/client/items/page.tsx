@@ -1,15 +1,17 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import ModernHeader from '@/app/components/ModernHeader'
 import Card from '@/app/components/Card'
 import StatusBadge from '@/app/components/StatusBadge'
 import { useClientProducts } from '@/lib/hooks'
+import { upload } from '@vercel/blob/client'
 
 interface ImportResult {
   success: boolean
+  importLogId?: number
   totalRows?: number
   insertedRows?: number
   updatedRows?: number
@@ -17,6 +19,26 @@ interface ImportResult {
   errors?: { row: number; error: string }[]
   error?: string
 }
+
+interface ImportProgress {
+  id: number
+  status: string
+  fileName: string
+  totalRows: number | null
+  lastProcessedRow: number
+  insertedRows: number | null
+  updatedRows: number | null
+  errorRows: number | null
+  progress: number
+  completedAt: string | null
+  errorDetails: { row: number; error: string }[] | null
+}
+
+// Large file threshold (4MB - below Vercel's 4.5MB limit)
+const LARGE_FILE_THRESHOLD = 4 * 1024 * 1024
+
+// Maximum file size (100MB)
+const MAX_FILE_SIZE = 100 * 1024 * 1024
 
 export default function ItemsPage() {
   const { data: session, status } = useSession()
@@ -27,6 +49,21 @@ export default function ItemsPage() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Large file upload state
+  const [isLargeFile, setIsLargeFile] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null)
+  const pollingRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current)
+      }
+    }
+  }, [])
 
   // Redirect if unauthenticated
   if (status === 'unauthenticated') {
@@ -53,16 +90,117 @@ export default function ItemsPage() {
     return null
   }
 
+  const pollImportProgress = async (logId: number) => {
+    try {
+      const res = await fetch(`/api/client/import/products/status/${logId}`)
+      if (res.ok) {
+        const data: ImportProgress = await res.json()
+        setImportProgress(data)
+
+        if (data.status === 'completed' || data.status === 'failed') {
+          // Stop polling
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current)
+            pollingRef.current = null
+          }
+          setUploading(false)
+          setImportResult({
+            success: data.status === 'completed',
+            importLogId: data.id,
+            totalRows: data.totalRows || 0,
+            insertedRows: data.insertedRows || 0,
+            updatedRows: data.updatedRows || 0,
+            errorRows: data.errorRows || 0,
+            errors: data.errorDetails ? data.errorDetails.slice(0, 10) : [],
+          })
+          mutate()
+        }
+      }
+    } catch (err) {
+      console.error('Polling error:', err)
+    }
+  }
+
+  const handleSmallFileUpload = async (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const res = await fetch('/api/client/import/products', {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (!res.ok) {
+      const errorText = await res.text()
+      let errorMessage = 'サーバーエラーが発生しました'
+      try {
+        const errorJson = JSON.parse(errorText)
+        errorMessage = errorJson.error || errorMessage
+      } catch {
+        if (res.status === 413) {
+          errorMessage = 'ファイルサイズが大きすぎます。'
+        }
+      }
+      throw new Error(errorMessage)
+    }
+
+    const data = await res.json()
+    setImportResult(data)
+
+    if (data.success) {
+      mutate()
+    }
+  }
+
+  const handleLargeFileUpload = async (file: File) => {
+    // Step 1: Upload to Vercel Blob
+    setUploadProgress(0)
+
+    const blob = await upload(`client-products/${file.name}`, file, {
+      access: 'public',
+      handleUploadUrl: '/api/client/import/products/init',
+      onUploadProgress: (progress) => {
+        setUploadProgress(Math.round((progress.loaded / progress.total) * 100))
+      },
+    })
+
+    setUploadProgress(100)
+
+    // Step 2: Enqueue for background processing
+    const enqueueRes = await fetch('/api/client/import/products/enqueue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        blobUrl: blob.url,
+        fileName: file.name,
+        fileSize: file.size,
+      }),
+    })
+
+    const enqueueData = await enqueueRes.json()
+
+    if (!enqueueData.success) {
+      throw new Error(enqueueData.error || 'キュー登録に失敗しました')
+    }
+
+    // Step 3: Start polling for progress
+    pollingRef.current = setInterval(() => {
+      pollImportProgress(enqueueData.importLogId)
+    }, 3000)
+
+    // Initial poll
+    pollImportProgress(enqueueData.importLogId)
+  }
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // Check file size (4MB limit for direct upload)
-    const MAX_FILE_SIZE = 4 * 1024 * 1024 // 4MB
+    // Check maximum file size
     if (file.size > MAX_FILE_SIZE) {
       setImportResult({
         success: false,
-        error: `ファイルサイズが大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB）。4MB以下のファイルをご利用ください。大容量ファイルは管理者にお問い合わせください。`
+        error: `ファイルサイズが大きすぎます（${(file.size / 1024 / 1024).toFixed(1)}MB）。最大100MBまで対応しています。`
       })
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
@@ -72,45 +210,44 @@ export default function ItemsPage() {
 
     setUploading(true)
     setImportResult(null)
+    setImportProgress(null)
+    setUploadProgress(0)
 
-    const formData = new FormData()
-    formData.append('file', file)
+    const isLarge = file.size > LARGE_FILE_THRESHOLD
+    setIsLargeFile(isLarge)
 
     try {
-      const res = await fetch('/api/client/import/products', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!res.ok) {
-        const errorText = await res.text()
-        let errorMessage = 'サーバーエラーが発生しました'
-        try {
-          const errorJson = JSON.parse(errorText)
-          errorMessage = errorJson.error || errorMessage
-        } catch {
-          if (res.status === 413) {
-            errorMessage = 'ファイルサイズが大きすぎます。4MB以下のファイルをご利用ください。'
-          }
-        }
-        setImportResult({ success: false, error: errorMessage })
-        return
+      if (isLarge) {
+        // Large file: Use Vercel Blob client upload
+        await handleLargeFileUpload(file)
+      } else {
+        // Small file: Use direct API upload
+        await handleSmallFileUpload(file)
+        setUploading(false)
       }
-
-      const data = await res.json()
-      setImportResult(data)
-
-      if (data.success) {
-        mutate()
-      }
-    } catch {
-      setImportResult({ success: false, error: 'アップロード中にエラーが発生しました。ネットワーク接続を確認してください。' })
-    } finally {
+    } catch (err) {
+      console.error('Upload error:', err)
+      const errorMessage = err instanceof Error ? err.message : 'アップロード中にエラーが発生しました'
+      setImportResult({ success: false, error: errorMessage })
       setUploading(false)
+    } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
     }
+  }
+
+  const handleCloseModal = () => {
+    // Stop polling if active
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
+    }
+    setShowImportModal(false)
+    setImportResult(null)
+    setImportProgress(null)
+    setUploadProgress(0)
+    setIsLargeFile(false)
   }
 
   const filteredProducts = products.filter((p: { productCode: string; productName: string; janCode: string | null }) => {
@@ -245,8 +382,9 @@ export default function ItemsPage() {
             <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">CSVインポート</h2>
               <button
-                onClick={() => { setShowImportModal(false); setImportResult(null); }}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                onClick={handleCloseModal}
+                disabled={uploading && isLargeFile}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -255,7 +393,7 @@ export default function ItemsPage() {
             </div>
 
             <div className="px-6 py-4">
-              {!importResult ? (
+              {!importResult && !uploading ? (
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">CSVファイルを選択</label>
@@ -269,23 +407,90 @@ export default function ItemsPage() {
                     />
                   </div>
 
-                  {uploading && (
-                    <div className="flex items-center gap-3 text-blue-600 dark:text-blue-400">
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 dark:border-blue-400"></div>
-                      <span>インポート中...</span>
-                    </div>
-                  )}
-
                   <div className="text-sm text-gray-500 dark:text-gray-400">
                     <p className="font-medium mb-1">対応フォーマット:</p>
                     <p>Shift-JIS / UTF-8 エンコーディングのCSV</p>
-                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">※ファイルサイズ上限: 4MB</p>
+                    <p className="text-xs text-green-600 dark:text-green-400 mt-1">※大容量ファイル対応（最大100MB）</p>
                     <p className="mt-2 text-xs font-mono bg-gray-50 dark:bg-gray-800 p-2 rounded text-gray-700 dark:text-gray-300">
                       商品コード, 商品名, 在庫数, 原価, 売価, ...
                     </p>
                   </div>
                 </div>
-              ) : (
+              ) : uploading ? (
+                <div className="space-y-4">
+                  {/* Upload phase */}
+                  {isLargeFile && uploadProgress < 100 && (
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-600 dark:text-gray-400">ファイルアップロード中...</span>
+                        <span className="text-gray-900 dark:text-white font-medium">{uploadProgress}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${uploadProgress}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Processing phase */}
+                  {(isLargeFile && uploadProgress >= 100) || importProgress ? (
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-600 dark:text-gray-400">
+                          {importProgress?.status === 'pending' ? '処理待機中...' :
+                           importProgress?.status === 'processing' ? 'データ処理中...' :
+                           '処理中...'}
+                        </span>
+                        <span className="text-gray-900 dark:text-white font-medium">
+                          {importProgress?.totalRows ? (
+                            `${importProgress.lastProcessedRow.toLocaleString()} / ${importProgress.totalRows.toLocaleString()} (${importProgress.progress}%)`
+                          ) : (
+                            '準備中...'
+                          )}
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                        <div
+                          className="bg-green-600 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${importProgress?.progress || 0}%` }}
+                        ></div>
+                      </div>
+                      {importProgress && (
+                        <div className="mt-3 grid grid-cols-3 gap-4 text-xs">
+                          <div className="text-center">
+                            <div className="text-gray-500 dark:text-gray-400">新規登録</div>
+                            <div className="text-green-600 dark:text-green-400 font-medium">
+                              {(importProgress.insertedRows || 0).toLocaleString()}
+                            </div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-gray-500 dark:text-gray-400">更新</div>
+                            <div className="text-blue-600 dark:text-blue-400 font-medium">
+                              {(importProgress.updatedRows || 0).toLocaleString()}
+                            </div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-gray-500 dark:text-gray-400">エラー</div>
+                            <div className="text-red-600 dark:text-red-400 font-medium">
+                              {(importProgress.errorRows || 0).toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                        大容量ファイルはバックグラウンドで処理されます。このダイアログを閉じても処理は継続されます。
+                      </p>
+                    </div>
+                  ) : !isLargeFile && (
+                    <div className="flex items-center gap-3 text-blue-600 dark:text-blue-400">
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 dark:border-blue-400"></div>
+                      <span>インポート中...</span>
+                    </div>
+                  )}
+                </div>
+              ) : importResult && (
                 <div className="space-y-4">
                   <div className="flex items-center gap-2">
                     <StatusBadge status={importResult.success ? "success" : "error"}>
@@ -298,15 +503,15 @@ export default function ItemsPage() {
                     <div className="grid grid-cols-3 gap-3">
                       <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded text-center">
                         <div className="text-xs text-gray-500 dark:text-gray-400">合計</div>
-                        <div className="text-lg font-semibold text-gray-900 dark:text-white">{importResult.totalRows}</div>
+                        <div className="text-lg font-semibold text-gray-900 dark:text-white">{importResult.totalRows?.toLocaleString()}</div>
                       </div>
                       <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded text-center">
                         <div className="text-xs text-gray-500 dark:text-gray-400">新規</div>
-                        <div className="text-lg font-semibold text-green-600 dark:text-green-400">{importResult.insertedRows}</div>
+                        <div className="text-lg font-semibold text-green-600 dark:text-green-400">{importResult.insertedRows?.toLocaleString()}</div>
                       </div>
                       <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded text-center">
                         <div className="text-xs text-gray-500 dark:text-gray-400">更新</div>
-                        <div className="text-lg font-semibold text-blue-600 dark:text-blue-400">{importResult.updatedRows}</div>
+                        <div className="text-lg font-semibold text-blue-600 dark:text-blue-400">{importResult.updatedRows?.toLocaleString()}</div>
                       </div>
                     </div>
                   )}
@@ -323,7 +528,7 @@ export default function ItemsPage() {
                   )}
 
                   <button
-                    onClick={() => { setShowImportModal(false); setImportResult(null); }}
+                    onClick={handleCloseModal}
                     className="w-full px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
                   >
                     閉じる

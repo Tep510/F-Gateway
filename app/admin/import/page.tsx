@@ -550,8 +550,8 @@ export default function AdminImport() {
 
       <main className="max-w-5xl mx-auto px-6 py-8">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">商品マスターインポート</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">クライアントのCSVカラムマッピング設定と商品マスターインポート</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">商品マスタ管理</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">クライアントのCSVカラムマッピング設定と商品マスタインポート</p>
         </div>
 
         {/* Client Selection */}
