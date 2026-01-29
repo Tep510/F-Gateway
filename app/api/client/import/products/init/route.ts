@@ -26,26 +26,29 @@ export async function POST(request: Request) {
     }
 
     const clientId = user.clientId
+    const userId = session.user.id
+
+    // Clone request to read body without consuming original
     const body = await request.json() as HandleUploadBody
 
     // Handle Vercel Blob client upload
     const jsonResponse = await handleUpload({
       body,
       request,
-      onBeforeGenerateToken: async (pathname) => {
+      onBeforeGenerateToken: async () => {
         return {
           allowedContentTypes: ['text/csv', 'application/vnd.ms-excel', 'text/plain'],
           maximumSizeInBytes: 100 * 1024 * 1024, // 100MB limit
           tokenPayload: JSON.stringify({
             clientId,
-            userId: session.user.id,
+            userId,
           }),
         }
       },
       onUploadCompleted: async ({ blob, tokenPayload }) => {
         // Parse token payload
         const payload = JSON.parse(tokenPayload || '{}')
-        const { clientId: cId, userId } = payload
+        const { clientId: cId, userId: uId } = payload
 
         // Create import log with blob URL
         await prisma.productImportLog.create({
@@ -55,7 +58,7 @@ export async function POST(request: Request) {
             fileSize: BigInt(0), // Will be updated during processing
             importStatus: 'pending',
             blobUrl: blob.url,
-            importedBy: userId,
+            importedBy: uId,
           },
         })
       },
