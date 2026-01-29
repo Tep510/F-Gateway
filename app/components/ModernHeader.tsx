@@ -79,8 +79,10 @@ export default function ModernHeader({ scope, clientName, userEmail, role }: Mod
   const adminNav = [
     { name: 'ダッシュボード', path: '/admin' },
     { name: 'クライアント', path: '/admin/clients' },
-    { name: '商品マスタ', path: '/admin/import' },
     { name: 'ユーザー', path: '/admin/users' },
+    { name: '商品マスタ', path: '/admin/import' },
+    { name: 'Google Drive', path: '/admin/google-drive' },
+    { name: 'Asana', path: '/admin/asana' },
     { name: 'ログ', path: '/admin/logs' },
     { name: '設定', path: '/admin/settings' },
   ];
