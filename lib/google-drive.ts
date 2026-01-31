@@ -130,19 +130,29 @@ async function createFolderInSharedDrive(
 }
 
 /**
- * Check if a folder exists and is accessible
+ * Check if a folder exists and is accessible (not a shared drive root)
  */
 async function checkFolderExists(
   drive: drive_v3.Drive,
-  folderId: string
-): Promise<{ exists: boolean; name?: string }> {
+  folderId: string,
+  sharedDriveId?: string
+): Promise<{ exists: boolean; name?: string; isSharedDriveRoot?: boolean }> {
   try {
+    // If folderId is the same as sharedDriveId, it's the root, not a folder
+    if (sharedDriveId && folderId === sharedDriveId) {
+      return { exists: false, isSharedDriveRoot: true }
+    }
+
     const response = await drive.files.get({
       fileId: folderId,
-      fields: 'id, name, trashed',
+      fields: 'id, name, trashed, mimeType',
       supportsAllDrives: true,
     })
     if (response.data.trashed) {
+      return { exists: false }
+    }
+    // Verify it's actually a folder
+    if (response.data.mimeType !== 'application/vnd.google-apps.folder') {
       return { exists: false }
     }
     return { exists: true, name: response.data.name || undefined }
@@ -211,10 +221,15 @@ export async function initializeDriveFolders(sharedDriveId: string): Promise<{
       let folderId = config.currentId
       let created = false
 
-      // Check if existing folder is still valid
+      // Check if existing folder is still valid (and not the shared drive root)
       if (folderId) {
-        const check = await checkFolderExists(drive, folderId)
+        const check = await checkFolderExists(drive, folderId, sharedDriveId)
         if (!check.exists) {
+          if (check.isSharedDriveRoot) {
+            await log.warn('settings', 'folder_id_is_shared_drive', `フォルダIDが共有ドライブIDと同一のため再作成: ${config.name}`, {
+              metadata: { folderId, sharedDriveId },
+            })
+          }
           folderId = null // Need to create new folder
         }
       }
@@ -361,6 +376,20 @@ export async function uploadCsvToDrive(
     return {
       success: false,
       error: `${folderName}フォルダがシステム設定で未設定です`,
+    }
+  }
+
+  // Prevent uploading to shared drive root
+  if (folderId === settings.sharedDriveId) {
+    const folderName = uploadType === 'shipping' ? '出庫予定' : '入庫予定'
+    await log.error('file_transfer', 'folder_is_shared_drive_root', `${folderName}フォルダIDが共有ドライブIDと同一です。管理画面で再初期化が必要です。`, new Error('Folder ID is shared drive root'), {
+      clientId,
+      requestId,
+      metadata: { uploadType, folderId, sharedDriveId: settings.sharedDriveId },
+    })
+    return {
+      success: false,
+      error: `${folderName}フォルダの設定が不正です。管理画面でGoogle Driveを再初期化してください。`,
     }
   }
 
