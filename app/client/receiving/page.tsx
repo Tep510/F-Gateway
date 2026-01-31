@@ -16,41 +16,14 @@ interface UploadResult {
   error?: string
 }
 
-export default function ReceivingPage() {
-  const { data: session, status } = useSession()
-  const router = useRouter()
+function ReceivingContent({ session }: { session: NonNullable<ReturnType<typeof useSession>['data']> }) {
   const { logs, isLoading, mutate } = useClientUploadLogs('receiving')
   const [uploading, setUploading] = useState(false)
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Redirect if unauthenticated
-  if (status === 'unauthenticated') {
-    router.replace('/')
-    return null
-  }
-
-  // Show minimal loading only for initial session check
-  if (status === 'loading') {
-    return (
-      <div className="min-h-screen bg-white dark:bg-black">
-        <div className="h-14 border-b border-gray-200 dark:border-gray-800" />
-        <div className="max-w-7xl mx-auto px-6 py-8">
-          <div className="animate-pulse space-y-6">
-            <div className="h-32 bg-gray-100 dark:bg-gray-900 rounded-lg" />
-            <div className="h-48 bg-gray-100 dark:bg-gray-900 rounded-lg" />
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (!session?.user) {
-    return null
-  }
-
-  const handleUpload = async (file: File) => {
+  const handleUpload = useCallback(async (file: File) => {
     if (!file.name.endsWith('.csv')) {
       setUploadResult({ success: false, error: 'CSVファイルのみアップロード可能です' })
       return
@@ -80,9 +53,9 @@ export default function ReceivingPage() {
     } finally {
       setUploading(false)
     }
-  }
+  }, [mutate])
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
       handleUpload(file)
@@ -90,7 +63,7 @@ export default function ReceivingPage() {
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
-  }
+  }, [handleUpload])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -110,7 +83,7 @@ export default function ReceivingPage() {
     if (file) {
       handleUpload(file)
     }
-  }, [])
+  }, [handleUpload])
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`
@@ -119,7 +92,7 @@ export default function ReceivingPage() {
   }
 
   const successCount = logs.filter((l: { status: string }) => l.status === 'completed').length
-  const errorCount = logs.filter((l: { status: string }) => l.status === 'failed').length
+  const errorCount = logs.filter((l: { status: string }) => l.status !== 'completed').length
 
   return (
     <div className="min-h-screen bg-white dark:bg-black">
@@ -294,4 +267,32 @@ export default function ReceivingPage() {
       </main>
     </div>
   )
+}
+
+export default function ReceivingPage() {
+  const { data: session, status } = useSession()
+  const router = useRouter()
+
+  // Show loading state
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-white dark:bg-black">
+        <div className="h-14 border-b border-gray-200 dark:border-gray-800" />
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          <div className="animate-pulse space-y-6">
+            <div className="h-32 bg-gray-100 dark:bg-gray-900 rounded-lg" />
+            <div className="h-48 bg-gray-100 dark:bg-gray-900 rounded-lg" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Redirect if unauthenticated
+  if (status === 'unauthenticated' || !session?.user) {
+    router.replace('/')
+    return null
+  }
+
+  return <ReceivingContent session={session} />
 }

@@ -40,9 +40,7 @@ const LARGE_FILE_THRESHOLD = 4 * 1024 * 1024
 // Maximum file size (100MB)
 const MAX_FILE_SIZE = 100 * 1024 * 1024
 
-export default function ItemsPage() {
-  const { data: session, status } = useSession()
-  const router = useRouter()
+function ItemsContent({ session }: { session: NonNullable<ReturnType<typeof useSession>['data']> }) {
   const { products, isLoading, mutate } = useClientProducts()
   const [uploading, setUploading] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
@@ -64,31 +62,6 @@ export default function ItemsPage() {
       }
     }
   }, [])
-
-  // Redirect if unauthenticated
-  if (status === 'unauthenticated') {
-    router.replace('/')
-    return null
-  }
-
-  // Show minimal loading only for initial session check
-  if (status === 'loading') {
-    return (
-      <div className="min-h-screen bg-white dark:bg-black">
-        <div className="h-14 border-b border-gray-200 dark:border-gray-800" />
-        <div className="max-w-7xl mx-auto px-6 py-8">
-          <div className="animate-pulse space-y-6">
-            <div className="h-32 bg-gray-100 dark:bg-gray-900 rounded-lg" />
-            <div className="h-64 bg-gray-100 dark:bg-gray-900 rounded-lg" />
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (!session?.user) {
-    return null
-  }
 
   const pollImportProgress = async (logId: number) => {
     try {
@@ -542,4 +515,32 @@ export default function ItemsPage() {
       )}
     </div>
   )
+}
+
+export default function ItemsPage() {
+  const { data: session, status } = useSession()
+  const router = useRouter()
+
+  // Show loading state
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-white dark:bg-black">
+        <div className="h-14 border-b border-gray-200 dark:border-gray-800" />
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          <div className="animate-pulse space-y-6">
+            <div className="h-32 bg-gray-100 dark:bg-gray-900 rounded-lg" />
+            <div className="h-64 bg-gray-100 dark:bg-gray-900 rounded-lg" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Redirect if unauthenticated
+  if (status === 'unauthenticated' || !session?.user) {
+    router.replace('/')
+    return null
+  }
+
+  return <ItemsContent session={session} />
 }
