@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | ドキュメント名 | Google Drive連携設計書 |
-| バージョン | 3.0 |
+| バージョン | 3.1 |
 | 最終更新 | 2026-02-01 |
 | 更新者 | Teppei & Claude |
 
@@ -40,28 +40,34 @@ F-GatewayとGoogle Drive間の連携設計を定義します。**システム全
   F-Gateway (Shared Drive)
   │
   ├── OUT_Forecast/                    # 出庫予定
-  │   ├── OUT_DAQ_202602011430.csv
-  │   ├── OUT_MNG_202602011500.csv
-  │   └── (All clients)
+  │   ├── DAQ/                         # クライアント別サブフォルダ（自動作成）
+  │   │   ├── OUT_DAQ_202602011430.csv
+  │   │   └── OUT_DAQ_202602011500.csv
+  │   └── MNG/
+  │       └── OUT_MNG_202602011430.csv
   │
   ├── OUT_Actual/                      # 出庫実績
   │   └── (Friendslogi returns here)
   │
   ├── IN_Forecast/                     # 入庫予定
-  │   ├── IN_DAQ_202602011430.csv
-  │   └── (All clients)
+  │   ├── DAQ/                         # クライアント別サブフォルダ（自動作成）
+  │   │   └── IN_DAQ_202602011430.csv
+  │   └── MNG/
+  │       └── IN_MNG_202602011430.csv
   │
   ├── IN_Actual/                       # 入庫実績
   │   └── (Friendslogi returns here)
   │
   └── STOCK/                           # 商品マスタ
-      ├── DAQ/                         # クライアント別サブフォルダ
+      ├── DAQ/                         # クライアント別サブフォルダ（自動作成）
       │   ├── STOCK_DAQ_202602011430.csv
       │   └── STOCK_DAQ_202602011500.csv
-      ├── MNG/
-      │   └── STOCK_MNG_202602011430.csv
-      └── (Auto-created per client)
+      └── MNG/
+          └── STOCK_MNG_202602011430.csv
 ```
+
+> **注意**: OUT_Forecast, IN_Forecast, STOCK の3フォルダはクライアント別サブフォルダを自動作成します。
+> OUT_Actual, IN_Actual は Friendslogi からの返却先のため、サブフォルダ構成は別途検討。
 
 ### データフロー
 
@@ -103,12 +109,19 @@ F-GatewayとGoogle Drive間の連携設計を定義します。**システム全
 | **IN_Actual** | 入庫実績CSVの返却先 | Friendslogi -> System | 自動作成 |
 | **STOCK** | 商品マスタCSVを集約（クライアント別サブフォルダ） | Client -> System | 自動作成 |
 
-### クライアント別サブフォルダ（STOCK内）
+### クライアント別サブフォルダ（自動作成）
 
-STOCKフォルダ内にクライアントコードをフォルダ名としたサブフォルダを自動作成します。
+OUT_Forecast, IN_Forecast, STOCK の3フォルダ内にクライアントコードをフォルダ名としたサブフォルダを自動作成します。
 
-- 商品マスタCSVアップロード時に自動作成
+| 親フォルダ | サブフォルダ | 作成タイミング |
+|-----------|------------|---------------|
+| `OUT_Forecast` | `{clientCode}/` | 出庫予定CSVアップロード時 |
+| `IN_Forecast` | `{clientCode}/` | 入庫予定CSVアップロード時 |
+| `STOCK` | `{clientCode}/` | 商品マスタCSVアップロード時 |
+
+**メリット:**
 - クライアントごとに履歴を分離管理
+- フォルダ単位でのアクセス権限設定が可能
 - ファイル名にもタイムスタンプを付与し、履歴を保持
 
 ---
@@ -357,3 +370,4 @@ model FileTransfer {
 | 2026-01-28 | 1.0 | 初版作成。クライアント単位のDrive設計 | Teppei & Claude |
 | 2026-01-28 | 2.0 | **設計変更**: システム全体で4フォルダを共有する方式に変更 | Teppei & Claude |
 | 2026-02-01 | 3.0 | **機能追加**: 共有ドライブ対応、5フォルダ自動作成、商品マスタCSV連携（STOCK/{clientCode}/）、ファイル命名規則を英語プレフィックスに変更 | Teppei & Claude |
+| 2026-02-01 | 3.1 | **設計変更**: 出庫予定・入庫予定もクライアント別サブフォルダ構成に変更（OUT_Forecast/{clientCode}/, IN_Forecast/{clientCode}/） | Teppei & Claude |

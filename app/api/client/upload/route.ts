@@ -111,12 +111,13 @@ export async function POST(request: Request) {
     let driveUploadError: string | undefined
 
     if (driveConfig.configured) {
-      // Upload to Google Drive
+      // Upload to Google Drive (creates client subfolder: {folderType}/{clientCode}/)
       const driveResult = await uploadCsvToDrive(
         newFileName,
         buffer, // Upload original buffer to preserve encoding
         uploadType as 'shipping' | 'receiving',
         clientId,
+        user.client.clientCode,
         requestId
       )
 

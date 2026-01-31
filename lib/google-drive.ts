@@ -351,12 +351,14 @@ export async function uploadFileToDrive(
 
 /**
  * Upload CSV to the appropriate folder based on type
+ * Creates client-specific subfolder: {folderType}/{clientCode}/
  */
 export async function uploadCsvToDrive(
   fileName: string,
   content: Buffer | string,
   uploadType: 'shipping' | 'receiving',
   clientId: number,
+  clientCode: string,
   requestId?: string
 ): Promise<UploadResult> {
   const settings = await getDriveSettings()
@@ -374,8 +376,9 @@ export async function uploadCsvToDrive(
     ? settings.shippingPlanFolderId
     : settings.receivingPlanFolderId
 
+  const folderName = uploadType === 'shipping' ? '出庫予定' : '入庫予定'
+
   if (!folderId) {
-    const folderName = uploadType === 'shipping' ? '出庫予定' : '入庫予定'
     await log.warn('file_transfer', 'folder_not_configured', `${folderName}フォルダが設定されていません`, {
       clientId,
       requestId,
@@ -389,7 +392,6 @@ export async function uploadCsvToDrive(
 
   // Prevent uploading to shared drive root
   if (folderId === settings.sharedDriveId) {
-    const folderName = uploadType === 'shipping' ? '出庫予定' : '入庫予定'
     await log.error('file_transfer', 'folder_is_shared_drive_root', `${folderName}フォルダIDが共有ドライブIDと同一です。管理画面で再初期化が必要です。`, new Error('Folder ID is shared drive root'), {
       clientId,
       requestId,
@@ -401,19 +403,38 @@ export async function uploadCsvToDrive(
     }
   }
 
+  // Get or create client-specific subfolder
+  const clientFolderResult = await getOrCreateClientFolder(
+    folderId,
+    clientCode,
+    settings.sharedDriveId!
+  )
+
+  if (!clientFolderResult.success || !clientFolderResult.folderId) {
+    await log.error('file_transfer', 'client_folder_creation_failed', `クライアントフォルダの作成に失敗: ${clientCode}`, new Error(clientFolderResult.error || 'Unknown error'), {
+      clientId,
+      requestId,
+      metadata: { clientCode, parentFolderId: folderId, uploadType },
+    })
+    return {
+      success: false,
+      error: `クライアントフォルダの作成に失敗しました: ${clientFolderResult.error}`,
+    }
+  }
+
   await log.info('file_transfer', 'drive_upload_start', `Google Driveアップロード開始: ${fileName}`, {
     clientId,
     requestId,
-    metadata: { uploadType, folderId },
+    metadata: { uploadType, clientCode, clientFolderId: clientFolderResult.folderId },
   })
 
-  const result = await uploadFileToDrive(fileName, content, folderId)
+  const result = await uploadFileToDrive(fileName, content, clientFolderResult.folderId)
 
   if (result.success) {
     await log.info('file_transfer', 'drive_upload_success', `Google Driveアップロード成功: ${fileName}`, {
       clientId,
       requestId,
-      metadata: { uploadType, fileId: result.fileId },
+      metadata: { uploadType, clientCode, fileId: result.fileId },
     })
   }
 
