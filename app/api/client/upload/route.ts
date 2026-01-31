@@ -79,10 +79,15 @@ export async function POST(request: Request) {
     // Count rows
     const rowCount = countCsvRows(content)
 
-    // Generate new filename with timestamp
+    // Generate new filename with timestamp (YYYYMMDDHHMM format)
     const now = new Date()
-    const timestamp = now.toISOString().replace(/-/g, '').replace(/:/g, '').replace(/T/g, '').slice(0, 14)
-    const prefix = uploadType === 'shipping' ? 'shukka' : 'nyuka'
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    const hour = String(now.getHours()).padStart(2, '0')
+    const minute = String(now.getMinutes()).padStart(2, '0')
+    const timestamp = `${year}${month}${day}${hour}${minute}`
+    const prefix = uploadType === 'shipping' ? 'OUT' : 'IN'
     const newFileName = `${prefix}_${user.client.clientCode}_${timestamp}.csv`
 
     await log.info('csv_upload', 'upload_start', `CSVアップロード開始: ${file.name} -> ${newFileName}`, {
