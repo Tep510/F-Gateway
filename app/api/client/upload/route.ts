@@ -133,8 +133,7 @@ export async function POST(request: Request) {
         requestId,
         metadata: {
           hasCredentials: driveConfig.hasCredentials,
-          hasShippingFolder: driveConfig.hasShippingFolder,
-          hasReceivingFolder: driveConfig.hasReceivingFolder,
+          initialized: driveConfig.initialized,
         },
       })
     }

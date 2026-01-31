@@ -1,15 +1,10 @@
 import { auth } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
 import { NextResponse } from 'next/server'
+import { getDriveSettings, isDriveConfigured, initializeDriveFolders, FOLDER_NAMES } from '@/lib/google-drive'
 
-// System-wide Google Drive folder setting keys
-const DRIVE_SETTING_KEYS = {
-  shippingPlan: 'google_drive_shipping_plan_folder_id',
-  shippingResult: 'google_drive_shipping_result_folder_id',
-  receivingPlan: 'google_drive_receiving_plan_folder_id',
-  receivingResult: 'google_drive_receiving_result_folder_id',
-}
-
+/**
+ * GET: Get Google Drive settings
+ */
 export async function GET() {
   try {
     const session = await auth()
@@ -22,28 +17,19 @@ export async function GET() {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // Get all Google Drive settings
-    const settings = await prisma.systemSetting.findMany({
-      where: {
-        settingKey: {
-          in: Object.values(DRIVE_SETTING_KEYS),
-        },
-      },
-    })
-
-    // Convert to object
-    const settingsMap: Record<string, string> = {}
-    settings.forEach(s => {
-      settingsMap[s.settingKey] = s.settingValue
-    })
+    const config = await isDriveConfigured()
+    const settings = await getDriveSettings()
 
     return NextResponse.json({
-      settings: {
-        shippingPlanFolderId: settingsMap[DRIVE_SETTING_KEYS.shippingPlan] || '',
-        shippingResultFolderId: settingsMap[DRIVE_SETTING_KEYS.shippingResult] || '',
-        receivingPlanFolderId: settingsMap[DRIVE_SETTING_KEYS.receivingPlan] || '',
-        receivingResultFolderId: settingsMap[DRIVE_SETTING_KEYS.receivingResult] || '',
-      },
+      hasCredentials: config.hasCredentials,
+      initialized: config.initialized,
+      sharedDriveId: settings.sharedDriveId || '',
+      folders: settings.initialized ? {
+        shippingPlan: { id: settings.shippingPlanFolderId, name: FOLDER_NAMES.shippingPlan },
+        shippingResult: { id: settings.shippingResultFolderId, name: FOLDER_NAMES.shippingResult },
+        receivingPlan: { id: settings.receivingPlanFolderId, name: FOLDER_NAMES.receivingPlan },
+        receivingResult: { id: settings.receivingResultFolderId, name: FOLDER_NAMES.receivingResult },
+      } : null,
     })
   } catch (error) {
     console.error('Google Drive settings GET error:', error)
@@ -54,6 +40,9 @@ export async function GET() {
   }
 }
 
+/**
+ * POST: Initialize Google Drive with shared drive ID
+ */
 export async function POST(request: Request) {
   try {
     const session = await auth()
@@ -67,60 +56,42 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const {
-      shippingPlanFolderId,
-      shippingResultFolderId,
-      receivingPlanFolderId,
-      receivingResultFolderId,
-    } = body
+    const { sharedDriveId } = body
 
-    // Upsert each setting
-    const updates = [
-      {
-        key: DRIVE_SETTING_KEYS.shippingPlan,
-        value: shippingPlanFolderId || '',
-        description: '出庫予定フォルダID（システム全体）',
-      },
-      {
-        key: DRIVE_SETTING_KEYS.shippingResult,
-        value: shippingResultFolderId || '',
-        description: '出庫実績フォルダID（システム全体）',
-      },
-      {
-        key: DRIVE_SETTING_KEYS.receivingPlan,
-        value: receivingPlanFolderId || '',
-        description: '入庫予定フォルダID（システム全体）',
-      },
-      {
-        key: DRIVE_SETTING_KEYS.receivingResult,
-        value: receivingResultFolderId || '',
-        description: '入庫実績フォルダID（システム全体）',
-      },
-    ]
+    if (!sharedDriveId) {
+      return NextResponse.json(
+        { error: '共有ドライブIDを入力してください' },
+        { status: 400 }
+      )
+    }
 
-    for (const update of updates) {
-      await prisma.systemSetting.upsert({
-        where: { settingKey: update.key },
-        create: {
-          settingKey: update.key,
-          settingValue: update.value,
-          description: update.description,
-        },
-        update: {
-          settingValue: update.value,
-          updatedAt: new Date(),
-        },
+    // Extract ID from URL if full URL provided
+    let driveId = sharedDriveId
+    const folderMatch = sharedDriveId.match(/\/folders\/([a-zA-Z0-9_-]+)/)
+    if (folderMatch) {
+      driveId = folderMatch[1]
+    } else {
+      const idMatch = sharedDriveId.match(/[?&]id=([a-zA-Z0-9_-]+)/)
+      if (idMatch) {
+        driveId = idMatch[1]
+      }
+    }
+
+    // Initialize folders
+    const result = await initializeDriveFolders(driveId)
+
+    if (!result.success) {
+      return NextResponse.json({
+        success: false,
+        error: result.error,
       })
     }
 
     return NextResponse.json({
       success: true,
-      settings: {
-        shippingPlanFolderId: shippingPlanFolderId || '',
-        shippingResultFolderId: shippingResultFolderId || '',
-        receivingPlanFolderId: receivingPlanFolderId || '',
-        receivingResultFolderId: receivingResultFolderId || '',
-      },
+      message: 'Google Driveの初期化が完了しました',
+      sharedDriveId: driveId,
+      folders: result.folders,
     })
   } catch (error) {
     console.error('Google Drive settings POST error:', error)
