@@ -38,65 +38,28 @@ export async function POST() {
       // Test access to each configured folder
       const folderTests: Record<string, { configured: boolean; accessible?: boolean; error?: string }> = {}
 
-      if (settings.shippingPlanFolderId) {
+      // Helper to test folder access (supports Shared Drives)
+      const testFolderAccess = async (folderId: string | null, folderName: string) => {
+        if (!folderId) {
+          return { configured: false }
+        }
         try {
           await drive.files.get({
-            fileId: settings.shippingPlanFolderId,
+            fileId: folderId,
             fields: 'id, name',
+            supportsAllDrives: true,
           })
-          folderTests.shippingPlan = { configured: true, accessible: true }
+          return { configured: true, accessible: true }
         } catch (e) {
           const err = e instanceof Error ? e.message : String(e)
-          folderTests.shippingPlan = { configured: true, accessible: false, error: err }
+          return { configured: true, accessible: false, error: err }
         }
-      } else {
-        folderTests.shippingPlan = { configured: false }
       }
 
-      if (settings.shippingResultFolderId) {
-        try {
-          await drive.files.get({
-            fileId: settings.shippingResultFolderId,
-            fields: 'id, name',
-          })
-          folderTests.shippingResult = { configured: true, accessible: true }
-        } catch (e) {
-          const err = e instanceof Error ? e.message : String(e)
-          folderTests.shippingResult = { configured: true, accessible: false, error: err }
-        }
-      } else {
-        folderTests.shippingResult = { configured: false }
-      }
-
-      if (settings.receivingPlanFolderId) {
-        try {
-          await drive.files.get({
-            fileId: settings.receivingPlanFolderId,
-            fields: 'id, name',
-          })
-          folderTests.receivingPlan = { configured: true, accessible: true }
-        } catch (e) {
-          const err = e instanceof Error ? e.message : String(e)
-          folderTests.receivingPlan = { configured: true, accessible: false, error: err }
-        }
-      } else {
-        folderTests.receivingPlan = { configured: false }
-      }
-
-      if (settings.receivingResultFolderId) {
-        try {
-          await drive.files.get({
-            fileId: settings.receivingResultFolderId,
-            fields: 'id, name',
-          })
-          folderTests.receivingResult = { configured: true, accessible: true }
-        } catch (e) {
-          const err = e instanceof Error ? e.message : String(e)
-          folderTests.receivingResult = { configured: true, accessible: false, error: err }
-        }
-      } else {
-        folderTests.receivingResult = { configured: false }
-      }
+      folderTests.shippingPlan = await testFolderAccess(settings.shippingPlanFolderId, 'shippingPlan')
+      folderTests.shippingResult = await testFolderAccess(settings.shippingResultFolderId, 'shippingResult')
+      folderTests.receivingPlan = await testFolderAccess(settings.receivingPlanFolderId, 'receivingPlan')
+      folderTests.receivingResult = await testFolderAccess(settings.receivingResultFolderId, 'receivingResult')
 
       // Check overall status
       const allAccessible = Object.values(folderTests).every(

@@ -97,7 +97,7 @@ export async function uploadFileToDrive(
       parents: [folderId],
     }
 
-    // Upload file
+    // Upload file (supportsAllDrives for Shared Drives)
     const response = await drive.files.create({
       requestBody: fileMetadata,
       media: {
@@ -105,6 +105,7 @@ export async function uploadFileToDrive(
         body: require('stream').Readable.from(fileContent),
       },
       fields: 'id, webViewLink',
+      supportsAllDrives: true,
     })
 
     if (!response.data.id) {
