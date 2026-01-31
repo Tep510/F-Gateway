@@ -36,7 +36,7 @@ export default function AdminGoogleDrive() {
   const [initResult, setInitResult] = useState<{ success: boolean; message: string; folders?: Record<string, FolderInfo> } | null>(null)
   const [copiedEmail, setCopiedEmail] = useState(false)
 
-  const serviceAccountEmail = "script@friendslogi.com"
+  const serviceAccountEmail = "f-gateway-drive@f-gateway.iam.gserviceaccount.com"
 
   const copyServiceAccountEmail = async () => {
     try {
