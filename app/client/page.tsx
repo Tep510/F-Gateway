@@ -272,19 +272,6 @@ export default function ClientDashboard() {
           </div>
         </Card>
 
-        <div className="mt-6">
-          <a
-            href="https://drive.google.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium text-gray-900 dark:text-white"
-          >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 2L2 19h10l10-17z" />
-            </svg>
-            Google Driveを開く
-          </a>
-        </div>
       </main>
       </RoleGuard>
     </div>
