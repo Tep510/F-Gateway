@@ -232,13 +232,17 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const type = searchParams.get('type') // 'shipping' or 'receiving'
 
+    // Support both old (shukka_/nyuka_) and new (OUT_/IN_) prefixes
+    const shippingPrefixes = ['OUT_', 'shukka_']
+    const receivingPrefixes = ['IN_', 'nyuka_']
+
     const logs = await prisma.csvUploadLog.findMany({
       where: {
         clientId: user.clientId,
         ...(type && {
-          fileName: {
-            startsWith: type === 'shipping' ? 'shukka_' : 'nyuka_',
-          },
+          OR: (type === 'shipping' ? shippingPrefixes : receivingPrefixes).map(prefix => ({
+            fileName: { startsWith: prefix }
+          })),
         }),
       },
       orderBy: {
