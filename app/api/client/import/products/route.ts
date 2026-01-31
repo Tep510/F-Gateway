@@ -2,6 +2,8 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import iconv from 'iconv-lite'
+import { uploadProductMasterToDrive, isDriveConfigured } from '@/lib/google-drive'
+import { log, generateRequestId } from '@/lib/systemLog'
 
 // CSV column mapping (Japanese header -> field name)
 const COLUMN_MAP: Record<string, string> = {
@@ -285,6 +287,8 @@ async function batchUpsertProductsRaw(products: ProductData[]): Promise<{ insert
 }
 
 export async function POST(request: Request) {
+  const requestId = generateRequestId()
+
   try {
     const session = await auth()
 
@@ -306,6 +310,7 @@ export async function POST(request: Request) {
     }
 
     const clientId = user.clientId
+    const clientCode = user.client.clientCode
 
     const formData = await request.formData()
     const file = formData.get('file') as File | null
@@ -322,6 +327,11 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(arrayBuffer)
     const encoding = detectEncoding(buffer)
     const content = iconv.decode(buffer, encoding)
+
+    // Generate renamed filename: STOCK_{clientCode}_{YYYYMMDDHHmm}.csv
+    const now = new Date()
+    const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+    const renamedFileName = `STOCK_${clientCode}_${timestamp}.csv`
 
     // Parse CSV
     const rows = parseCSV(content)
@@ -467,6 +477,46 @@ export async function POST(request: Request) {
       },
     })
 
+    // Upload to Google Drive (STOCK/{clientCode}/)
+    let driveUploadSuccess = false
+    let driveFileId: string | null = null
+
+    const driveConfig = await isDriveConfigured()
+    if (driveConfig.configured) {
+      const driveResult = await uploadProductMasterToDrive(
+        renamedFileName,
+        buffer, // Upload original buffer to preserve encoding
+        clientId,
+        clientCode,
+        requestId
+      )
+
+      if (driveResult.success && driveResult.fileId) {
+        driveUploadSuccess = true
+        driveFileId = driveResult.fileId
+
+        // Update import log with Drive file info
+        await prisma.productImportLog.update({
+          where: { id: importLog.id },
+          data: {
+            driveFileId: driveResult.fileId,
+            driveFileName: renamedFileName,
+          },
+        })
+      } else {
+        await log.warn('product_import', 'drive_upload_failed', `商品マスタのGoogle Driveアップロード失敗: ${renamedFileName}`, {
+          clientId,
+          requestId,
+          metadata: { error: driveResult.error },
+        })
+      }
+    } else {
+      await log.info('product_import', 'drive_not_configured', 'Google Driveが未設定のためローカル保存のみ', {
+        clientId,
+        requestId,
+      })
+    }
+
     return NextResponse.json({
       success: true,
       importLogId: importLog.id,
@@ -475,6 +525,9 @@ export async function POST(request: Request) {
       updatedRows: totalUpdated,
       errorRows,
       errors: errors.slice(0, 10),
+      driveUploadSuccess,
+      driveFileId,
+      driveFileName: driveUploadSuccess ? renamedFileName : null,
     })
   } catch (error) {
     console.error('Client product import error:', error)

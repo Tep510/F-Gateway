@@ -3,21 +3,21 @@
 | 項目 | 内容 |
 |------|------|
 | ドキュメント名 | Google Drive連携設計書 |
-| バージョン | 2.0 |
-| 最終更新 | 2026-01-28 |
+| バージョン | 3.0 |
+| 最終更新 | 2026-02-01 |
 | 更新者 | Teppei & Claude |
 
 ---
 
 ## 概要
 
-F-GatewayとGoogle Drive間の連携設計を定義します。**システム全体で4つの共有フォルダ**を使用し、全クライアントのCSVを集約管理します。
+F-GatewayとGoogle Drive間の連携設計を定義します。**システム全体で5つの共有フォルダ**を使用し、全クライアントのCSVを集約管理します。
 
 ### 前提条件
 
-- **サービスアカウント**: `script@friendslogi.com`
-- **対象Drive**: 上記アカウントがアクセス可能なFriendslogi社のGoogle Workspace Drive
-- 設定する4つのフォルダは、すべて `script@friendslogi.com` が編集権限を持つフォルダであること
+- **サービスアカウント**: `f-gateway-drive@f-gateway.iam.gserviceaccount.com`
+- **対象Drive**: 共有ドライブ「F-Gateway」
+- サービスアカウントが「コンテンツ管理者」として共有ドライブに追加されていること
 
 ---
 
@@ -25,43 +25,42 @@ F-GatewayとGoogle Drive間の連携設計を定義します。**システム全
 
 ### 設計方針
 
-- **システム全体で4フォルダを共有**: 全クライアントのCSVは共通のフォルダに格納
+- **システム全体で5フォルダを共有**: 全クライアントのCSVは共通のフォルダに格納
 - **クライアント識別はファイル名で実施**: リネーム時にクライアントコードを付与
+- **商品マスタはクライアント別サブフォルダ**: STOCK/{clientCode}/ に格納
 - **管理者設定でフォルダを一括管理**: クライアント個別のDrive設定は不要
 
 ### フォルダ構成
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Google Drive Structure (System-wide)                      │
+│                    Google Drive Structure (F-Gateway Shared Drive)           │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-                              ┌────────────────────────────────────┐
-                              │    F-Gateway System Folders        │
-                              │    (Admin Settings)                │
-                              │                                    │
-  [Client A]                  │  ┌──────────────────────────────┐  │
-  Upload via F-Gateway ──────>│  │ 出庫予定/                     │  │
-                              │  │   DAQ_20260128_143052.csv    │  │
-  [Client B]                  │  │   MNG_20260128_091530.csv    │  │
-  Upload via F-Gateway ──────>│  │   (All clients)              │  │
-                              │  └──────────────────────────────┘  │
-  [Client C]                  │                                    │
-  Upload via F-Gateway ──────>│  ┌──────────────────────────────┐  │
-                              │  │ 出庫実績/                     │  │
-                              │  │   (Friendslogi returns here) │  │
-                              │  └──────────────────────────────┘  │
-                              │                                    │
-                              │  ┌──────────────────────────────┐  │
-                              │  │ 入庫予定/                     │  │
-                              │  │   (All clients)              │  │
-                              │  └──────────────────────────────┘  │
-                              │                                    │
-                              │  ┌──────────────────────────────┐  │
-                              │  │ 入庫実績/                     │  │
-                              │  │   (Friendslogi returns here) │  │
-                              │  └──────────────────────────────┘  │
-                              └────────────────────────────────────┘
+  F-Gateway (Shared Drive)
+  │
+  ├── OUT_Forecast/                    # 出庫予定
+  │   ├── OUT_DAQ_202602011430.csv
+  │   ├── OUT_MNG_202602011500.csv
+  │   └── (All clients)
+  │
+  ├── OUT_Actual/                      # 出庫実績
+  │   └── (Friendslogi returns here)
+  │
+  ├── IN_Forecast/                     # 入庫予定
+  │   ├── IN_DAQ_202602011430.csv
+  │   └── (All clients)
+  │
+  ├── IN_Actual/                       # 入庫実績
+  │   └── (Friendslogi returns here)
+  │
+  └── STOCK/                           # 商品マスタ
+      ├── DAQ/                         # クライアント別サブフォルダ
+      │   ├── STOCK_DAQ_202602011430.csv
+      │   └── STOCK_DAQ_202602011500.csv
+      ├── MNG/
+      │   └── STOCK_MNG_202602011430.csv
+      └── (Auto-created per client)
 ```
 
 ### データフロー
@@ -94,18 +93,23 @@ F-GatewayとGoogle Drive間の連携設計を定義します。**システム全
 
 ## フォルダ設定
 
-### システム共有フォルダ（4種類）
+### システム共有フォルダ（5種類）
 
-| フォルダ | 用途 | 方向 | 設定場所 |
-|---------|------|------|---------|
-| **出庫予定** | 全クライアントの出庫予定CSVを集約 | Client -> Friendslogi | Admin設定 |
-| **出庫実績** | 出庫実績CSVの返却先 | Friendslogi -> System | Admin設定 |
-| **入庫予定** | 全クライアントの入庫予定CSVを集約 | Client -> Friendslogi | Admin設定 |
-| **入庫実績** | 入庫実績CSVの返却先 | Friendslogi -> System | Admin設定 |
+| フォルダ名 | 用途 | 方向 | 設定場所 |
+|-----------|------|------|---------|
+| **OUT_Forecast** | 全クライアントの出庫予定CSVを集約 | Client -> Friendslogi | 自動作成 |
+| **OUT_Actual** | 出庫実績CSVの返却先 | Friendslogi -> System | 自動作成 |
+| **IN_Forecast** | 全クライアントの入庫予定CSVを集約 | Client -> Friendslogi | 自動作成 |
+| **IN_Actual** | 入庫実績CSVの返却先 | Friendslogi -> System | 自動作成 |
+| **STOCK** | 商品マスタCSVを集約（クライアント別サブフォルダ） | Client -> System | 自動作成 |
 
-### クライアント固有フォルダ
+### クライアント別サブフォルダ（STOCK内）
 
-**不要**: クライアントはF-Gateway経由でCSVをアップロードするため、クライアント固有のGoogle Driveフォルダは設定しません。
+STOCKフォルダ内にクライアントコードをフォルダ名としたサブフォルダを自動作成します。
+
+- 商品マスタCSVアップロード時に自動作成
+- クライアントごとに履歴を分離管理
+- ファイル名にもタイムスタンプを付与し、履歴を保持
 
 ---
 
@@ -214,23 +218,17 @@ Google Drive設定を保存
 
 ### アップロード時のリネーム
 
-```
-# 元ファイル名（任意）
-sample_data.csv
-
-# リネーム後（標準形式）
-{clientCode}_{YYYYMMDD}_{HHMMSS}.csv
-
-# 例
-DAQ_20260128_143052.csv
-MNG_20260128_091530.csv
-ABC_20260128_162015.csv
-```
+| 種別 | 命名規則 | 例 |
+|------|----------|-----|
+| **出庫予定** | `OUT_{clientCode}_{YYYYMMDDHHmm}.csv` | `OUT_DAQ_202602011430.csv` |
+| **入庫予定** | `IN_{clientCode}_{YYYYMMDDHHmm}.csv` | `IN_DAQ_202602011430.csv` |
+| **商品マスタ** | `STOCK_{clientCode}_{YYYYMMDDHHmm}.csv` | `STOCK_DAQ_202602011430.csv` |
 
 ### クライアント識別
 
-- ファイル名のプレフィックスでクライアントを識別
+- ファイル名のプレフィックス後にクライアントコードを付与
 - システムはファイル名からクライアントコードを抽出して処理
+- タイムスタンプ形式: YYYYMMDDHHmm（分単位まで）
 
 ---
 
@@ -327,20 +325,23 @@ model FileTransfer {
 
 1. [x] SystemSettingテーブルにDrive設定を保存
 2. [x] 管理者設定画面にGoogle Driveタブを追加
-3. [x] フォルダID入力・保存機能
+3. [x] 共有ドライブID入力・初期化機能
 4. [x] クライアント管理からDrive設定を削除
 
-### Phase 2: アクセス確認（未実装）
+### Phase 2: フォルダ自動作成（完了）
 
-1. [ ] Google Drive APIクライアント実装
-2. [ ] フォルダアクセス確認機能
-3. [ ] アクセスステータス表示
+1. [x] Google Drive APIクライアント実装（サービスアカウント認証）
+2. [x] 共有ドライブ（Shared Drive）対応
+3. [x] 5フォルダ自動作成（OUT_Forecast, OUT_Actual, IN_Forecast, IN_Actual, STOCK）
+4. [x] フォルダアクセス確認・ステータス表示
 
-### Phase 3: ファイル転送（未実装）
+### Phase 3: ファイル転送（完了）
 
-1. [ ] CSVアップロード時のリネーム処理
-2. [ ] システムフォルダへのアップロード
-3. [ ] 転送ログ記録
+1. [x] 出庫/入庫CSVアップロード時のリネーム処理
+2. [x] 該当フォルダへのアップロード
+3. [x] 転送ログ記録（CsvUploadLog）
+4. [x] 商品マスタCSVのGoogle Drive連携
+5. [x] クライアント別サブフォルダ自動作成（STOCK/{clientCode}/）
 
 ### Phase 4: 監視・通知（未実装）
 
@@ -354,4 +355,5 @@ model FileTransfer {
 | 日付 | 版数 | 更新内容 | 更新者 |
 |------|------|---------|--------|
 | 2026-01-28 | 1.0 | 初版作成。クライアント単位のDrive設計 | Teppei & Claude |
-| 2026-01-28 | 2.0 | **設計変更**: システム全体で4フォルダを共有する方式に変更。クライアント単位のDrive設定を廃止 | Teppei & Claude |
+| 2026-01-28 | 2.0 | **設計変更**: システム全体で4フォルダを共有する方式に変更 | Teppei & Claude |
+| 2026-02-01 | 3.0 | **機能追加**: 共有ドライブ対応、5フォルダ自動作成、商品マスタCSV連携（STOCK/{clientCode}/）、ファイル命名規則を英語プレフィックスに変更 | Teppei & Claude |

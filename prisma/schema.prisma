@@ -368,6 +368,8 @@ model ProductImportLog {
   blobUrl             String?         @map("blob_url")
   lastProcessedRow    Int             @default(0) @map("last_processed_row")
   processingStartedAt DateTime?       @map("processing_started_at") @db.Timestamptz(6)
+  driveFileId         String?         @map("drive_file_id") @db.VarChar(255)
+  driveFileName       String?         @map("drive_file_name") @db.VarChar(255)
   client              Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
   products            ProductMaster[]
 

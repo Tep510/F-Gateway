@@ -12,6 +12,7 @@ const DRIVE_SETTING_KEYS = {
   shippingResult: 'google_drive_shipping_result_folder_id',
   receivingPlan: 'google_drive_receiving_plan_folder_id',
   receivingResult: 'google_drive_receiving_result_folder_id',
+  stock: 'google_drive_stock_folder_id',
   initialized: 'google_drive_initialized',
 }
 
@@ -21,6 +22,7 @@ const FOLDER_NAMES = {
   shippingResult: 'OUT_Actual',
   receivingPlan: 'IN_Forecast',
   receivingResult: 'IN_Actual',
+  stock: 'STOCK',
 }
 
 /**
@@ -62,6 +64,7 @@ export interface DriveSettings {
   shippingResultFolderId: string | null
   receivingPlanFolderId: string | null
   receivingResultFolderId: string | null
+  stockFolderId: string | null
   initialized: boolean
 }
 
@@ -82,6 +85,7 @@ export async function getDriveSettings(): Promise<DriveSettings> {
     shippingResultFolderId: settingsMap.get(DRIVE_SETTING_KEYS.shippingResult) || null,
     receivingPlanFolderId: settingsMap.get(DRIVE_SETTING_KEYS.receivingPlan) || null,
     receivingResultFolderId: settingsMap.get(DRIVE_SETTING_KEYS.receivingResult) || null,
+    stockFolderId: settingsMap.get(DRIVE_SETTING_KEYS.stock) || null,
     initialized: settingsMap.get(DRIVE_SETTING_KEYS.initialized) === 'true',
   }
 }
@@ -163,7 +167,7 @@ async function checkFolderExists(
 
 /**
  * Initialize Google Drive folders
- * Creates the 4 required folders in the shared drive if they don't exist
+ * Creates the 5 required folders in the shared drive if they don't exist
  */
 export async function initializeDriveFolders(sharedDriveId: string): Promise<{
   success: boolean
@@ -173,6 +177,7 @@ export async function initializeDriveFolders(sharedDriveId: string): Promise<{
     shippingResult: { id: string; name: string; created: boolean }
     receivingPlan: { id: string; name: string; created: boolean }
     receivingResult: { id: string; name: string; created: boolean }
+    stock: { id: string; name: string; created: boolean }
   }
 }> {
   try {
@@ -202,11 +207,13 @@ export async function initializeDriveFolders(sharedDriveId: string): Promise<{
       shippingResult: { id: string; name: string; created: boolean }
       receivingPlan: { id: string; name: string; created: boolean }
       receivingResult: { id: string; name: string; created: boolean }
+      stock: { id: string; name: string; created: boolean }
     } = {
       shippingPlan: { id: '', name: FOLDER_NAMES.shippingPlan, created: false },
       shippingResult: { id: '', name: FOLDER_NAMES.shippingResult, created: false },
       receivingPlan: { id: '', name: FOLDER_NAMES.receivingPlan, created: false },
       receivingResult: { id: '', name: FOLDER_NAMES.receivingResult, created: false },
+      stock: { id: '', name: FOLDER_NAMES.stock, created: false },
     }
 
     // Check/create each folder
@@ -215,6 +222,7 @@ export async function initializeDriveFolders(sharedDriveId: string): Promise<{
       { key: 'shippingResult', settingKey: DRIVE_SETTING_KEYS.shippingResult, currentId: currentSettings.shippingResultFolderId, name: FOLDER_NAMES.shippingResult, desc: '出庫実績フォルダID' },
       { key: 'receivingPlan', settingKey: DRIVE_SETTING_KEYS.receivingPlan, currentId: currentSettings.receivingPlanFolderId, name: FOLDER_NAMES.receivingPlan, desc: '入庫予定フォルダID' },
       { key: 'receivingResult', settingKey: DRIVE_SETTING_KEYS.receivingResult, currentId: currentSettings.receivingResultFolderId, name: FOLDER_NAMES.receivingResult, desc: '入庫実績フォルダID' },
+      { key: 'stock', settingKey: DRIVE_SETTING_KEYS.stock, currentId: currentSettings.stockFolderId, name: FOLDER_NAMES.stock, desc: '商品マスタフォルダID' },
     ]
 
     for (const config of folderConfigs) {
@@ -430,6 +438,156 @@ export async function isDriveConfigured(): Promise<{
     hasCredentials,
     sharedDriveId: settings.sharedDriveId,
   }
+}
+
+/**
+ * Get or create a client-specific subfolder inside a parent folder
+ */
+async function getOrCreateClientFolder(
+  parentFolderId: string,
+  clientCode: string,
+  sharedDriveId: string
+): Promise<{ success: boolean; folderId?: string; created?: boolean; error?: string }> {
+  try {
+    const drive = await getDriveClient()
+
+    // Search for existing folder with the client code name
+    const searchResponse = await drive.files.list({
+      q: `'${parentFolderId}' in parents and name = '${clientCode}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      fields: 'files(id, name)',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      corpora: 'drive',
+      driveId: sharedDriveId,
+    })
+
+    if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+      // Folder exists
+      return {
+        success: true,
+        folderId: searchResponse.data.files[0].id!,
+        created: false,
+      }
+    }
+
+    // Create new folder
+    const createResponse = await drive.files.create({
+      requestBody: {
+        name: clientCode,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentFolderId],
+      },
+      fields: 'id',
+      supportsAllDrives: true,
+    })
+
+    if (!createResponse.data.id) {
+      return {
+        success: false,
+        error: `Failed to create client folder: ${clientCode}`,
+      }
+    }
+
+    await log.info('settings', 'client_folder_created', `クライアントフォルダを作成しました: ${clientCode}`, {
+      metadata: { folderId: createResponse.data.id, clientCode, parentFolderId },
+    })
+
+    return {
+      success: true,
+      folderId: createResponse.data.id,
+      created: true,
+    }
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error))
+    return {
+      success: false,
+      error: err.message,
+    }
+  }
+}
+
+/**
+ * Upload product master CSV to Google Drive (STOCK/{clientCode}/)
+ */
+export async function uploadProductMasterToDrive(
+  fileName: string,
+  content: Buffer | string,
+  clientId: number,
+  clientCode: string,
+  requestId?: string
+): Promise<UploadResult> {
+  const settings = await getDriveSettings()
+
+  // Check if initialized
+  if (!settings.initialized) {
+    return {
+      success: false,
+      error: 'Google Driveが初期化されていません。管理画面で初期化を実行してください。',
+    }
+  }
+
+  // Check STOCK folder
+  if (!settings.stockFolderId) {
+    await log.warn('file_transfer', 'stock_folder_not_configured', '商品マスタフォルダ（STOCK）が設定されていません', {
+      clientId,
+      requestId,
+    })
+    return {
+      success: false,
+      error: '商品マスタフォルダ（STOCK）がシステム設定で未設定です',
+    }
+  }
+
+  // Prevent uploading to shared drive root
+  if (settings.stockFolderId === settings.sharedDriveId) {
+    await log.error('file_transfer', 'stock_folder_is_shared_drive_root', 'STOCKフォルダIDが共有ドライブIDと同一です。管理画面で再初期化が必要です。', new Error('Folder ID is shared drive root'), {
+      clientId,
+      requestId,
+      metadata: { stockFolderId: settings.stockFolderId, sharedDriveId: settings.sharedDriveId },
+    })
+    return {
+      success: false,
+      error: 'STOCKフォルダの設定が不正です。管理画面でGoogle Driveを再初期化してください。',
+    }
+  }
+
+  // Get or create client-specific subfolder
+  const clientFolderResult = await getOrCreateClientFolder(
+    settings.stockFolderId,
+    clientCode,
+    settings.sharedDriveId!
+  )
+
+  if (!clientFolderResult.success || !clientFolderResult.folderId) {
+    await log.error('file_transfer', 'client_folder_creation_failed', `クライアントフォルダの作成に失敗: ${clientCode}`, new Error(clientFolderResult.error || 'Unknown error'), {
+      clientId,
+      requestId,
+      metadata: { clientCode, stockFolderId: settings.stockFolderId },
+    })
+    return {
+      success: false,
+      error: `クライアントフォルダの作成に失敗しました: ${clientFolderResult.error}`,
+    }
+  }
+
+  await log.info('file_transfer', 'product_master_upload_start', `商品マスタアップロード開始: ${fileName}`, {
+    clientId,
+    requestId,
+    metadata: { clientCode, clientFolderId: clientFolderResult.folderId },
+  })
+
+  // Upload to client folder
+  const result = await uploadFileToDrive(fileName, content, clientFolderResult.folderId)
+
+  if (result.success) {
+    await log.info('file_transfer', 'product_master_upload_success', `商品マスタアップロード成功: ${fileName}`, {
+      clientId,
+      requestId,
+      metadata: { clientCode, fileId: result.fileId },
+    })
+  }
+
+  return result
 }
 
 export { DRIVE_SETTING_KEYS, FOLDER_NAMES }

@@ -29,6 +29,7 @@ export async function GET() {
         shippingResult: { id: settings.shippingResultFolderId, name: FOLDER_NAMES.shippingResult },
         receivingPlan: { id: settings.receivingPlanFolderId, name: FOLDER_NAMES.receivingPlan },
         receivingResult: { id: settings.receivingResultFolderId, name: FOLDER_NAMES.receivingResult },
+        stock: { id: settings.stockFolderId, name: FOLDER_NAMES.stock },
       } : null,
     })
   } catch (error) {
