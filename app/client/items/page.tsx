@@ -40,12 +40,37 @@ const LARGE_FILE_THRESHOLD = 4 * 1024 * 1024
 // Maximum file size (100MB)
 const MAX_FILE_SIZE = 100 * 1024 * 1024
 
+// Page size options
+const PAGE_SIZE_OPTIONS = [50, 100, 250, 500, 1000]
+const DEFAULT_PAGE_SIZE = 250
+
 function ItemsContent({ session }: { session: NonNullable<ReturnType<typeof useSession>['data']> }) {
-  const { products, isLoading, mutate } = useClientProducts()
+  // Pagination state
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+
+  // Use debounced search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchInput !== searchTerm) {
+        setSearchTerm(searchInput)
+        setPage(1) // Reset to first page on search
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput, searchTerm])
+
+  const { products, pagination, isLoading, mutate } = useClientProducts({
+    page,
+    limit,
+    search: searchTerm,
+  })
+
   const [uploading, setUploading] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
-  const [searchTerm, setSearchTerm] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Large file upload state
@@ -224,15 +249,11 @@ function ItemsContent({ session }: { session: NonNullable<ReturnType<typeof useS
     setIsLargeFile(false)
   }
 
-  const filteredProducts = products.filter((p: { productCode: string; productName: string; janCode: string | null }) => {
-    const matchesSearch = !searchTerm ||
-      p.productCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (p.janCode && p.janCode.toLowerCase().includes(searchTerm.toLowerCase()))
-    return matchesSearch
-  })
+  // Total count from pagination (server-side)
+  const totalCount = pagination?.totalCount || 0
 
-  const totalCostValue = products.reduce((sum: number, p: { costPrice: number }) => sum + Number(p.costPrice), 0)
+  // Cost value for current page only (full calculation would require server-side aggregation)
+  const pageCostValue = products.reduce((sum: number, p: { costPrice: number }) => sum + Number(p.costPrice), 0)
 
   return (
     <div className="min-h-screen bg-white dark:bg-black">
@@ -253,7 +274,7 @@ function ItemsContent({ session }: { session: NonNullable<ReturnType<typeof useS
             <div className="text-right">
               <div className="text-xs text-gray-500 dark:text-gray-400">総商品数</div>
               <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {isLoading ? '-' : `${products.length}件`}
+                {isLoading ? '-' : `${totalCount.toLocaleString()}件`}
               </div>
             </div>
             <StatusBadge status="success">同期済み</StatusBadge>
@@ -262,23 +283,29 @@ function ItemsContent({ session }: { session: NonNullable<ReturnType<typeof useS
 
         {/* Summary */}
         <Card title="商品マスタサマリー" className="mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div>
               <div className="text-sm text-gray-600 dark:text-gray-400">総商品数</div>
               <div className="text-3xl font-bold text-gray-900 dark:text-white mt-1">
+                {isLoading ? '-' : `${totalCount.toLocaleString()}品`}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">表示中</div>
+              <div className="text-3xl font-bold text-blue-600 dark:text-blue-400 mt-1">
                 {isLoading ? '-' : `${products.length}品`}
               </div>
             </div>
             <div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">アクティブ商品</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">ページ</div>
               <div className="text-3xl font-bold text-green-600 dark:text-green-400 mt-1">
-                {isLoading ? '-' : `${products.length}品`}
+                {isLoading ? '-' : `${pagination?.page || 1}/${pagination?.totalPages || 1}`}
               </div>
             </div>
             <div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">原価合計</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">表示中の原価合計</div>
               <div className="text-3xl font-bold text-purple-600 dark:text-purple-400 mt-1">
-                {isLoading ? '-' : `${totalCostValue.toLocaleString()}円`}
+                {isLoading ? '-' : `${pageCostValue.toLocaleString()}円`}
               </div>
             </div>
           </div>
@@ -286,20 +313,46 @@ function ItemsContent({ session }: { session: NonNullable<ReturnType<typeof useS
 
         {/* Item List */}
         <Card title="商品一覧">
-          <div className="mb-4 flex items-center justify-between">
-            <input
-              type="text"
-              placeholder="商品コード・名称・JANコードで検索"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded text-sm w-72 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
-            />
-            <button
-              onClick={() => setShowImportModal(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
-            >
-              CSVインポート
-            </button>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                placeholder="商品コード・名称・JANコードで検索"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded text-sm w-72 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+              />
+              {searchInput && (
+                <button
+                  onClick={() => { setSearchInput(''); setSearchTerm(''); setPage(1); }}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-600 dark:text-gray-400">表示件数:</label>
+                <select
+                  value={limit}
+                  onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
+                  className="px-2 py-1 border border-gray-300 dark:border-gray-700 rounded text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                >
+                  {PAGE_SIZE_OPTIONS.map(size => (
+                    <option key={size} value={size}>{size}件</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
+              >
+                CSVインポート
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -320,14 +373,14 @@ function ItemsContent({ session }: { session: NonNullable<ReturnType<typeof useS
                       読み込み中...
                     </td>
                   </tr>
-                ) : filteredProducts.length === 0 ? (
+                ) : products.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-8 text-center text-gray-500 dark:text-gray-400">
-                      {products.length === 0 ? '商品データがありません。CSVインポートで登録してください。' : '該当する商品がありません'}
+                      {totalCount === 0 ? '商品データがありません。CSVインポートで登録してください。' : '該当する商品がありません'}
                     </td>
                   </tr>
                 ) : (
-                  filteredProducts.map((product: { id: number; productCode: string; productName: string; costPrice: number; janCode: string | null; updatedAt: string }) => (
+                  products.map((product: { id: number; productCode: string; productName: string; costPrice: number; janCode: string | null; updatedAt: string }) => (
                     <tr key={product.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                       <td className="py-3 px-4 text-sm font-mono text-gray-900 dark:text-white">{product.productCode}</td>
                       <td className="py-3 px-4 text-sm text-gray-700 dark:text-gray-300">{product.productName}</td>
@@ -346,6 +399,64 @@ function ItemsContent({ session }: { session: NonNullable<ReturnType<typeof useS
               </tbody>
             </table>
           </div>
+
+          {/* Pagination Controls */}
+          {pagination && pagination.totalPages > 1 && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-gray-200 dark:border-gray-700 pt-4">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                {((page - 1) * limit + 1).toLocaleString()} - {Math.min(page * limit, totalCount).toLocaleString()} / {totalCount.toLocaleString()}件
+              </div>
+              <div className="flex items-center gap-2">
+                {/* First Page */}
+                <button
+                  onClick={() => setPage(1)}
+                  disabled={!pagination.hasPrevPage}
+                  className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  最初
+                </button>
+                {/* Prev Page */}
+                <button
+                  onClick={() => setPage(page - 1)}
+                  disabled={!pagination.hasPrevPage}
+                  className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  前へ
+                </button>
+                {/* Page Input */}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={pagination.totalPages}
+                    value={page}
+                    onChange={(e) => {
+                      const newPage = Math.max(1, Math.min(pagination.totalPages, parseInt(e.target.value) || 1))
+                      setPage(newPage)
+                    }}
+                    className="w-16 px-2 py-1 text-sm text-center border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                  />
+                  <span className="text-sm text-gray-600 dark:text-gray-400">/ {pagination.totalPages}</span>
+                </div>
+                {/* Next Page */}
+                <button
+                  onClick={() => setPage(page + 1)}
+                  disabled={!pagination.hasNextPage}
+                  className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  次へ
+                </button>
+                {/* Last Page */}
+                <button
+                  onClick={() => setPage(pagination.totalPages)}
+                  disabled={!pagination.hasNextPage}
+                  className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  最後
+                </button>
+              </div>
+            </div>
+          )}
         </Card>
       </main>
 

@@ -11,14 +11,27 @@ export function useClientDashboard() {
   return { data, error, isLoading, mutate }
 }
 
-// Client Products
-export function useClientProducts() {
-  const { data, error, isLoading, mutate } = useSWR('/api/client/products', fetcher, {
+// Client Products (with pagination)
+export function useClientProducts(params: {
+  page?: number
+  limit?: number
+  search?: string
+} = {}) {
+  const searchParams = new URLSearchParams()
+  if (params.page) searchParams.set('page', String(params.page))
+  if (params.limit) searchParams.set('limit', String(params.limit))
+  if (params.search) searchParams.set('search', params.search)
+
+  const queryString = searchParams.toString()
+  const url = queryString ? `/api/client/products?${queryString}` : '/api/client/products'
+
+  const { data, error, isLoading, mutate } = useSWR(url, fetcher, {
     revalidateOnFocus: false,
     dedupingInterval: 30000,
   })
   return {
     products: data?.products || [],
+    pagination: data?.pagination || null,
     error,
     isLoading,
     mutate
