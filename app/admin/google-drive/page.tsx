@@ -281,7 +281,7 @@ export default function AdminGoogleDrive() {
               <span className="flex-shrink-0 w-6 h-6 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full flex items-center justify-center text-xs font-medium">3</span>
               <div>
                 <span className="font-medium">共有ドライブのフォルダに自動格納</span>
-                <p className="text-gray-500 dark:text-gray-400 text-xs mt-0.5">出庫予定 → 「出庫予定」フォルダ、入庫予定 → 「入庫予定」フォルダ</p>
+                <p className="text-gray-500 dark:text-gray-400 text-xs mt-0.5">出庫予定 → OUT_Forecast、入庫予定 → IN_Forecast</p>
               </div>
             </div>
             <div className="flex items-start gap-3">

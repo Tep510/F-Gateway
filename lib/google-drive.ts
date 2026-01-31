@@ -17,10 +17,10 @@ const DRIVE_SETTING_KEYS = {
 
 // Folder names to create
 const FOLDER_NAMES = {
-  shippingPlan: '出庫予定',
-  shippingResult: '出庫実績',
-  receivingPlan: '入庫予定',
-  receivingResult: '入庫実績',
+  shippingPlan: 'OUT_Forecast',
+  shippingResult: 'OUT_Actual',
+  receivingPlan: 'IN_Forecast',
+  receivingResult: 'IN_Actual',
 }
 
 /**
